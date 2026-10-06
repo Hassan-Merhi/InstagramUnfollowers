@@ -1,4 +1,4 @@
-import React, { ChangeEvent, useEffect, useState } from "react";
+import React, { ChangeEvent, useEffect, useRef, useState } from "react";
 import { render } from "react-dom";
 import "./styles.scss";
 
@@ -13,6 +13,7 @@ import {
   DEFAULT_TIME_TO_WAIT_AFTER_FIVE_UNFOLLOWS,
   DEFAULT_USERS_PER_SEARCH_CYCLE,
   FOLLOWING_PAGE_SAFETY_LIMIT,
+  MAX_CONSECUTIVE_EMPTY_PAGES,
   CHECKS_BEFORE_LONG_SLEEP,
   INSTAGRAM_ASBD_ID,
   INSTAGRAM_HOSTNAME,
@@ -26,6 +27,7 @@ import {
   FriendshipsPage,
   getCookie,
   getCurrentPageUnfollowers,
+  getMaxPage,
   getUsersForDisplay,
   InstagramApiError,
   RawFriendshipUser,
@@ -40,7 +42,7 @@ import { Searching } from "./components/Searching";
 import { Toolbar } from "./components/Toolbar";
 import { Unfollowing } from "./components/Unfollowing";
 import { Timings } from "./model/timings";
-import { loadCachedScanResults, loadTimings, loadWhitelist, saveCachedScanResults, saveTimings, saveWhitelist } from "./utils/whitelist-manager";
+import { clearScanSession, loadCachedScanResults, loadScanSession, loadTimings, loadWhitelist, saveCachedScanResults, saveScanSession, saveTimings, saveWhitelist } from "./utils/whitelist-manager";
 import { getInitialLanguage, Language, saveLanguage, t } from "./utils/i18n";
 
 const LOCAL_PREVIEW_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
@@ -94,36 +96,67 @@ const _getPreviewUsers = (): readonly UserNode[] => [
   _createPreviewUser("12", "lowlight.club", "Owen Voss", { isPrivate: true }),
 ];
 
-// pause
-let scanningPaused = false;
+const getInitialAppState = (): State => {
+  if (isLocalPreview && new URLSearchParams(location.search).get("preview") === "scanning") {
+    const previewUsers = _getPreviewUsers();
+    return {
+      status: "scanning",
+      page: 1,
+      searchTerm: "",
+      currentTab: "non_whitelisted",
+      percentage: 100,
+      isScanningActive: false,
+      results: previewUsers,
+      selectedResults: previewUsers.slice(0, 3),
+      whitelistedResults: previewUsers.slice(10, 12),
+      filter: {
+        showVerified: true,
+        showPrivate: true,
+        showWithOutProfilePicture: true,
+      },
+    };
+  }
 
-function pauseScan() {
-  scanningPaused = !scanningPaused;
-}
+  const restored = loadScanSession();
+  if (restored !== null) {
+    const whitelistedResults = loadWhitelist();
+    const selectedIds = new Set(restored.selectedIds);
+    const selectedResults = restored.results.filter(user => selectedIds.has(user.id));
+    const displayed = getUsersForDisplay(
+      restored.results,
+      whitelistedResults,
+      restored.currentTab,
+      restored.searchTerm,
+      restored.filter,
+    );
+    return {
+      status: "scanning",
+      page: Math.min(Math.max(restored.page, 1), getMaxPage(displayed)),
+      searchTerm: restored.searchTerm,
+      currentTab: restored.currentTab,
+      percentage: 100,
+      isScanningActive: false,
+      scanIncomplete: restored.scanIncomplete,
+      results: restored.results,
+      selectedResults,
+      whitelistedResults,
+      filter: restored.filter,
+    };
+  }
 
+  return { status: "initial" };
+};
 
 function App() {
-  const [state, setState] = useState<State>({
-    ...(
-      isLocalPreview && new URLSearchParams(location.search).get("preview") === "scanning"
-        ? {
-          status: "scanning",
-          page: 1,
-          searchTerm: "",
-          currentTab: "non_whitelisted",
-          percentage: 100,
-          results: _getPreviewUsers(),
-          selectedResults: _getPreviewUsers().slice(0, 3),
-          whitelistedResults: _getPreviewUsers().slice(10, 12),
-          filter: {
-            showVerified: true,
-            showPrivate: true,
-            showWithOutProfilePicture: true,
-          },
-        } as State
-        : { status: "initial" as const }
-    ),
-  });
+  const [state, setState] = useState<State>(() => getInitialAppState());
+  const scanningPausedRef = useRef(false);
+  const [scanningPaused, setScanningPaused] = useState(false);
+
+  const pauseScan = () => {
+    const nextPaused = !scanningPausedRef.current;
+    scanningPausedRef.current = nextPaused;
+    setScanningPaused(nextPaused);
+  };
 
   const [toast, setToast] = useState<{ readonly show: false } | { readonly show: true; readonly text: string }>({
     show: false,
@@ -144,6 +177,25 @@ function App() {
   useEffect(() => {
     saveTimings(timings);
   }, [timings]);
+
+  useEffect(() => {
+    if (state.status === "scanning") {
+      if (state.results.length > 0 || !state.isScanningActive) {
+        saveScanSession({
+          page: state.page,
+          currentTab: state.currentTab,
+          searchTerm: state.searchTerm,
+          results: state.results,
+          selectedIds: state.selectedResults.map(user => user.id),
+          filter: state.filter,
+          scanIncomplete: Boolean(state.scanIncomplete || state.isScanningActive),
+          timestamp: Date.now(),
+        });
+      }
+      return;
+    }
+    clearScanSession();
+  }, [state]);
 
   const [cachedScan, setCachedScan] = useState<{ readonly results: readonly UserNode[]; readonly timestamp: number } | null>(() =>
     loadCachedScanResults(),
@@ -203,6 +255,9 @@ function App() {
     if (state.status !== "initial") {
       return;
     }
+    clearScanSession();
+    scanningPausedRef.current = false;
+    setScanningPaused(false);
     if (isLocalPreview) {
       const previewUsers = _getPreviewUsers();
       setState({
@@ -246,123 +301,134 @@ function App() {
     if (state.status !== "scanning") {
       return;
     }
-    if (state.selectedResults.length > 0) {
-      if (!confirm("Changing filter options will clear selected users")) {
-        // Force re-render. Bit of a hack but had an issue where the checkbox state was still
-        // changing in the UI even even when not confirming. So updating the state fixes this
-        // by synchronizing the checkboxes with the filter statuses in the state.
-        setState({ ...state });
-        return;
-      }
+    const name = e.currentTarget.name;
+    const checked = e.currentTarget.checked;
+    if (state.selectedResults.length > 0 && !confirm("Changing filter options will clear selected users")) {
+      setState(prevState => ({ ...prevState }));
+      return;
     }
-    setState({
-      ...state,
-      // Make sure to clear selected results when changing filter options. This is to avoid having
-      // users selected in the unfollow queue but not visible in the UI, which would be confusing.
-      selectedResults: [],
-      filter: {
-        ...state.filter,
-        [e.currentTarget.name]: e.currentTarget.checked,
-      },
+    setState(prevState => {
+      if (prevState.status !== "scanning") {
+        return prevState;
+      }
+      return {
+        ...prevState,
+        page: 1,
+        selectedResults: [],
+        filter: {
+          ...prevState.filter,
+          [name]: checked,
+        },
+      };
     });
   };
 
   const handleUnfollowFilter = (e: ChangeEvent<HTMLInputElement>) => {
-    if (state.status !== "unfollowing") {
-      return;
-    }
-    setState({
-      ...state,
-      filter: {
-        ...state.filter,
-        [e.currentTarget.name]: e.currentTarget.checked,
-      },
+    const name = e.currentTarget.name;
+    const checked = e.currentTarget.checked;
+    setState(prevState => {
+      if (prevState.status !== "unfollowing") {
+        return prevState;
+      }
+      return {
+        ...prevState,
+        filter: {
+          ...prevState.filter,
+          [name]: checked,
+        },
+      };
     });
   };
 
   const toggleUser = (newStatus: boolean, user: UserNode) => {
-    if (state.status !== "scanning") {
-      return;
-    }
-    if (newStatus) {
-      setState({
-        ...state,
-        selectedResults: [...state.selectedResults, user],
-      });
-    } else {
-      setState({
-        ...state,
-        selectedResults: state.selectedResults.filter(result => result.id !== user.id),
-      });
-    }
+    setState(prevState => {
+      if (prevState.status !== "scanning") {
+        return prevState;
+      }
+      if (newStatus) {
+        if (prevState.selectedResults.some(result => result.id === user.id)) {
+          return prevState;
+        }
+        return {
+          ...prevState,
+          selectedResults: [...prevState.selectedResults, user],
+        };
+      }
+      return {
+        ...prevState,
+        selectedResults: prevState.selectedResults.filter(result => result.id !== user.id),
+      };
+    });
   };
 
   const toggleAllUsers = (e: ChangeEvent<HTMLInputElement>) => {
-    if (state.status !== "scanning") {
-      return;
-    }
-    const displayed = getUsersForDisplay(
-      state.results,
-      state.whitelistedResults,
-      state.currentTab,
-      state.searchTerm,
-      state.filter,
-    );
-    if (e.currentTarget.checked) {
-      const currentIds = new Set(state.selectedResults.map(u => u.id));
-      const toAdd = displayed.filter(u => !currentIds.has(u.id));
-      setState({
-        ...state,
-        selectedResults: [...state.selectedResults, ...toAdd],
-      });
-    } else {
-      const displayedIds = new Set(displayed.map(u => u.id));
-      setState({
-        ...state,
-        selectedResults: state.selectedResults.filter(u => !displayedIds.has(u.id)),
-      });
-    }
+    const checked = e.currentTarget.checked;
+    setState(prevState => {
+      if (prevState.status !== "scanning") {
+        return prevState;
+      }
+      const displayed = getUsersForDisplay(
+        prevState.results,
+        prevState.whitelistedResults,
+        prevState.currentTab,
+        prevState.searchTerm,
+        prevState.filter,
+      );
+      if (checked) {
+        const currentIds = new Set(prevState.selectedResults.map(user => user.id));
+        const toAdd = displayed.filter(user => !currentIds.has(user.id));
+        return {
+          ...prevState,
+          selectedResults: [...prevState.selectedResults, ...toAdd],
+        };
+      }
+      const displayedIds = new Set(displayed.map(user => user.id));
+      return {
+        ...prevState,
+        selectedResults: prevState.selectedResults.filter(user => !displayedIds.has(user.id)),
+      };
+    });
   };
 
-  // it will work the same as toggleAllUsers, but it will select everyone on the current page.
   const toggleCurrentePageUsers = (e: ChangeEvent<HTMLInputElement>) => {
-    if (state.status !== "scanning") {
-      return;
-    }
-    const pageUsers = getCurrentPageUnfollowers(
-      getUsersForDisplay(
-        state.results,
-        state.whitelistedResults,
-        state.currentTab,
-        state.searchTerm,
-        state.filter,
-      ),
-      state.page,
-    );
-    if (e.currentTarget.checked) {
-      const currentIds = new Set(state.selectedResults.map(u => u.id));
-      const toAdd = pageUsers.filter(u => !currentIds.has(u.id));
-      setState({
-        ...state,
-        selectedResults: [...state.selectedResults, ...toAdd],
-      });
-    } else {
-      const pageUserIds = new Set(pageUsers.map(u => u.id));
-      setState({
-        ...state,
-        selectedResults: state.selectedResults.filter(u => !pageUserIds.has(u.id)),
-      });
-    }
+    const checked = e.currentTarget.checked;
+    setState(prevState => {
+      if (prevState.status !== "scanning") {
+        return prevState;
+      }
+      const pageUsers = getCurrentPageUnfollowers(
+        getUsersForDisplay(
+          prevState.results,
+          prevState.whitelistedResults,
+          prevState.currentTab,
+          prevState.searchTerm,
+          prevState.filter,
+        ),
+        prevState.page,
+      );
+      if (checked) {
+        const currentIds = new Set(prevState.selectedResults.map(user => user.id));
+        const toAdd = pageUsers.filter(user => !currentIds.has(user.id));
+        return {
+          ...prevState,
+          selectedResults: [...prevState.selectedResults, ...toAdd],
+        };
+      }
+      const pageUserIds = new Set(pageUsers.map(user => user.id));
+      return {
+        ...prevState,
+        selectedResults: prevState.selectedResults.filter(user => !pageUserIds.has(user.id)),
+      };
+    });
   };
 
   const onWhitelistUpdate = (updatedWhitelist: readonly UserNode[]) => {
     saveWhitelist(updatedWhitelist);
-    if (state.status === "scanning") {
-      setState({
-        ...state,
-        whitelistedResults: updatedWhitelist,
-      });
-    }
+    setState(prevState =>
+      prevState.status === "scanning"
+        ? { ...prevState, whitelistedResults: updatedWhitelist }
+        : prevState,
+    );
   };
 
   useEffect(() => {
@@ -450,7 +516,7 @@ function App() {
     let requestsSinceLongSleep = 0;
     const paceRequest = async () => {
       // Pause scanning if user requested so.
-      while (scanningPaused) {
+      while (scanningPausedRef.current) {
         await sleep(1000);
         console.info("Scan paused");
       }
@@ -485,6 +551,8 @@ function App() {
     ): Promise<boolean> => {
       let maxId: string | undefined;
       let pagesFetched = 0;
+      let consecutiveEmptyPages = 0;
+      const seenCursors = new Set<string>();
 
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       while (true) {
@@ -493,25 +561,54 @@ function App() {
           console.error(`Stopping ${kind} scan early.`);
           return false;
         }
+
+        pagesFetched += 1;
+        if (pagesFetched > pageSafetyLimit) {
+          console.error(`Stopping ${kind} scan early: hit the safety cap of ${pageSafetyLimit} pages.`);
+          return false;
+        }
+
         const page = result.page;
         const pageUsers = page.users ?? [];
-
         if (!(await onPageUsers(pageUsers))) {
           return false;
         }
 
-        const hasMore = Boolean(page.next_max_id) && page.has_more !== false;
-        if (!hasMore || pageUsers.length === 0) {
+        if (page.has_more === false) {
           return true;
         }
 
-        pagesFetched += 1;
-        if (pagesFetched >= pageSafetyLimit) {
-          console.error(`Stopping ${kind} scan early: hit the safety cap of ${pageSafetyLimit} pages.`);
+        const rawNextMaxId = page.next_max_id;
+        const nextMaxId =
+          rawNextMaxId === undefined || rawNextMaxId === null || String(rawNextMaxId).trim() === ""
+            ? undefined
+            : String(rawNextMaxId);
+
+        if (nextMaxId === undefined) {
+          if (page.has_more === true) {
+            console.error(`Stopping ${kind} scan early: Instagram reported more pages without a cursor.`);
+            return false;
+          }
+          return true;
+        }
+
+        if (nextMaxId === maxId || seenCursors.has(nextMaxId)) {
+          console.error(`Stopping ${kind} scan early: Instagram repeated pagination cursor ${nextMaxId}.`);
           return false;
         }
-        maxId = page.next_max_id;
+        seenCursors.add(nextMaxId);
 
+        if (pageUsers.length === 0) {
+          consecutiveEmptyPages += 1;
+          if (consecutiveEmptyPages >= MAX_CONSECUTIVE_EMPTY_PAGES) {
+            console.error(`Stopping ${kind} scan early after ${consecutiveEmptyPages} empty pages.`);
+            return false;
+          }
+        } else {
+          consecutiveEmptyPages = 0;
+        }
+
+        maxId = nextMaxId;
         await paceRequest();
       }
     };
@@ -538,6 +635,7 @@ function App() {
       // followed account and eliminates the old "viewer appears first" guess.
       const nonFollowers: UserNode[] = [];
       const followerIds = new Set<string>();
+      const processedFollowingIds = new Set<string>();
       let followerCount = 0;
       let checkedCount = 0;
 
@@ -593,14 +691,17 @@ function App() {
         const pageNonFollowers: UserNode[] = [];
         for (const user of pageUsers) {
           const userId = String(user.pk_id ?? user.pk);
+          if (processedFollowingIds.has(userId)) {
+            continue;
+          }
+          processedFollowingIds.add(userId);
+          checkedCount += 1;
           if (!followerIds.has(userId)) {
             const node = rawFriendshipUserToUserNode(user, false);
             nonFollowers.push(node);
             pageNonFollowers.push(node);
           }
         }
-
-        checkedCount += pageUsers.length;
         setState(prevState => {
           if (prevState.status !== "scanning") {
             return prevState;
