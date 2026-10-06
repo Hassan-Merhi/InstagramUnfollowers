@@ -130,7 +130,9 @@ export const translations = {
     rateLimitPause: "Instagram cooldown active. Pausing for %s seconds before retrying...",
     sleepingSafety: "Sleeping %s seconds to prevent getting temp blocked",
     loadedFromCache: "Loaded %s accounts from cache!",
-    actionBlockedWarning: "⚠️ Instagram Action Block detected (feedback_required). Unfollow queue stopped to protect your account.",
+    actionBlockedWarning: "⚠️ Instagram Action Block detected. The unfollow queue was stopped.",
+    sessionExpired: "Instagram session token is missing or expired. Sign in again before retrying.",
+    queueStoppedSummary: "Queue stopped after %s of %s accounts were processed.",
   },
   es: {
     // Launch Screen
@@ -259,7 +261,9 @@ export const translations = {
     rateLimitPause: "Enfriamiento de Instagram activo. Pausando %s segundos antes de reintentar...",
     sleepingSafety: "Esperando %s segundos para prevenir bloqueos temporales",
     loadedFromCache: "¡Se cargaron %s cuentas del historial!",
-    actionBlockedWarning: "⚠️ Bloqueo de acción de Instagram detectado (feedback_required). La cola se detuvo para proteger tu cuenta.",
+    actionBlockedWarning: "⚠️ Instagram bloqueó la acción. La cola de unfollow fue detenida.",
+    sessionExpired: "Falta el token de sesión de Instagram o ha caducado. Inicia sesión de nuevo antes de reintentar.",
+    queueStoppedSummary: "La cola se detuvo después de procesar %s de %s cuentas.",
   },
 } as const;
 
