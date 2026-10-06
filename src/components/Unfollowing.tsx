@@ -57,6 +57,15 @@ export const Unfollowing = (
             <hr />
           </>
         )}
+        {state.percentage === 100 && state.unfollowLog.length < state.selectedResults.length && (
+          <>
+            <hr />
+            <div className="fs-large p-medium clr-red">
+              {t(lang, "queueStoppedSummary", state.unfollowLog.length, state.selectedResults.length)}
+            </div>
+            <hr />
+          </>
+        )}
         {getUnfollowLogForDisplay(state.unfollowLog, state.searchTerm, state.filter).map(
           (entry, index) =>
             entry.unfollowedSuccessfully ? (
