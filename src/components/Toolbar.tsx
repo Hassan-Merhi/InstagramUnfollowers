@@ -111,12 +111,13 @@ export const Toolbar = ({
           <button
             className="copy-list"
             onClick={() => {
-              if (state.status === "scanning") {
-                return copyListToClipboard(
-                  displayedScanningUsers,
-                  t(lang, "copiedToClipboard"),
-                );
+              if (state.status !== "scanning") {
+                return;
               }
+              void copyListToClipboard(
+                displayedScanningUsers,
+                t(lang, "copiedToClipboard"),
+              );
             }}
             disabled={state.status !== "scanning" || displayedScanningUsers.length === 0}
           >
