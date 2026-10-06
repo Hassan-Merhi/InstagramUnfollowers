@@ -21,7 +21,7 @@ export const NotSearching = ({onScan, lang, cachedScan, onLoadCached}: NotSearch
         <button className="run-scan" onClick={onScan}>
           {t(lang, "runScan")}
         </button>
-        {cachedScan && cachedScan.results.length > 0 && onLoadCached && (
+        {cachedScan && onLoadCached && (
           <button type="button" className="load-cached-scan" onClick={onLoadCached}>
             ⚡ {t(lang, "loadCachedScan", cachedScan.results.length)}
           </button>
