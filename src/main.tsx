@@ -118,12 +118,13 @@ const getInitialAppState = (): State => {
   }
 
   const restored = loadScanSession();
-  if (restored !== null) {
+  const cachedScan = loadCachedScanResults();
+  if (restored !== null && cachedScan !== null) {
     const whitelistedResults = loadWhitelist();
     const selectedIds = new Set(restored.selectedIds);
-    const selectedResults = restored.results.filter(user => selectedIds.has(user.id));
+    const selectedResults = cachedScan.results.filter(user => selectedIds.has(user.id));
     const displayed = getUsersForDisplay(
-      restored.results,
+      cachedScan.results,
       whitelistedResults,
       restored.currentTab,
       restored.searchTerm,
@@ -136,8 +137,8 @@ const getInitialAppState = (): State => {
       currentTab: restored.currentTab,
       percentage: 100,
       isScanningActive: false,
-      scanIncomplete: restored.scanIncomplete,
-      results: restored.results,
+      scanIncomplete: false,
+      results: cachedScan.results,
       selectedResults,
       whitelistedResults,
       filter: restored.filter,
@@ -179,22 +180,25 @@ function App() {
   }, [timings]);
 
   useEffect(() => {
-    if (state.status === "scanning") {
-      if (state.results.length > 0 || !state.isScanningActive) {
-        saveScanSession({
-          page: state.page,
-          currentTab: state.currentTab,
-          searchTerm: state.searchTerm,
-          results: state.results,
-          selectedIds: state.selectedResults.map(user => user.id),
-          filter: state.filter,
-          scanIncomplete: Boolean(state.scanIncomplete || state.isScanningActive),
-          timestamp: Date.now(),
-        });
-      }
+    if (
+      state.status === "scanning" &&
+      !state.isScanningActive &&
+      !state.scanIncomplete
+    ) {
+      saveScanSession({
+        page: state.page,
+        currentTab: state.currentTab,
+        searchTerm: state.searchTerm,
+        selectedIds: state.selectedResults.map(user => user.id),
+        filter: state.filter,
+        scanIncomplete: false,
+        timestamp: Date.now(),
+      });
       return;
     }
-    clearScanSession();
+    if (state.status !== "scanning") {
+      clearScanSession();
+    }
   }, [state]);
 
   const [cachedScan, setCachedScan] = useState<{ readonly results: readonly UserNode[]; readonly timestamp: number } | null>(() =>
