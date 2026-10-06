@@ -60,7 +60,11 @@ export function exportToJSON(users: readonly UserNode[]): void {
 }
 
 const csvEscape = (value: string | number | boolean): string => {
-  const text = String(value);
+  let text = String(value);
+  // Prevent CSV/spreadsheet formula execution for user-controlled text.
+  if (/^[=+@-]/.test(text) || /^[\t\r]/.test(text)) {
+    text = `'${text}`;
+  }
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 };
 
