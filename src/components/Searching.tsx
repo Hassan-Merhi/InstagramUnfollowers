@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React from "react";
 import { assertUnreachable, getCurrentPageUnfollowers, getMaxPage, getUsersForDisplay, isWithoutProfilePicture } from "../utils/utils";
 import { State } from "../model/state";
 import { UserNode } from "../model/user";
@@ -41,17 +41,6 @@ export const Searching = ({
     state.filter,
   );
   const maxPage = getMaxPage(usersForDisplay);
-
-  useEffect(() => {
-    if (state.page <= maxPage) {
-      return;
-    }
-    setState(prevState =>
-      prevState.status === "scanning"
-        ? { ...prevState, page: maxPage }
-        : prevState,
-    );
-  }, [maxPage, setState, state.page]);
 
   const selectMatching = (predicate: (user: UserNode) => boolean) => {
     setState(prevState => {
