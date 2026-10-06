@@ -2,12 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.0.0] - 2026-10-07
+
+### Added
+- Completed four reliability and release-hardening waves.
+- Deterministic followers-vs-following scan comparison with large-account pagination safeguards.
+- Live-safe Select Page / Select All behavior, stop/pause controls, review-state recovery, and bilingual UX improvements.
+- Release gates for TypeScript, production build generation, smoke validation, and production dependency auditing.
+
+### Changed
+- Unfollow actions are verified before being shown as successful and stopped queues finalize cleanly.
+- Browser-stored scan, whitelist, session, and timing data are validated before use.
+- GitHub Actions now uses Node 22 LTS and least-privilege permissions.
+- Documentation now points to this repository and describes request pacing without promising avoidance of platform restrictions.
+
+### Security
+- CSV exports neutralize spreadsheet-formula prefixes.
+- Whitelist imports reject oversized or malformed files.
+- Successful unfollows invalidate stale cached scan results.
+
 ## [1.2.0] - 2026-04-04
 
 ### Added
 - **Whitelist Star Button:** Dedicated star (★) button on each profile row for instant whitelist management.
 - **Sticky Actions:** The "UNFOLLOW" button is now fixed at the bottom of the sidebar for constant accessibility.
-- **Anti-Detection Measures:** Randomized micro-pauses (500ms-2k ms) and dynamic sleep cycles (+/- 5s randomization) to mimic human behavior and avoid Instagram rate limits.
+- **Request Pacing:** Added randomized short waits and periodic cooldowns between requests. These reduce request bursts but do not guarantee avoidance of platform limits or restrictions.
 - **Data Persistence:** Whitelist state and scan timing settings are now saved in `localStorage`.
 
 ### Changed
@@ -61,7 +80,7 @@ Todos los cambios notables en este proyecto serán documentados en este archivo.
 ### Añadido
 - **Botón de Estrella (Whitelist):** Botón (★) dedicado en cada usuario para añadir o quitar de la lista blanca al instante.
 - **Acciones Fijas:** El botón "UNFOLLOW" ahora está fijado en la parte inferior del lateral para que siempre esté accesible.
-- **Medidas Anti-Detección:** Micro-pausas aleatorias (500ms-2k ms) y ciclos de espera dinámicos (variación de +/- 5s) para imitar comportamiento humano y evitar bloqueos.
+- **Ritmo de Solicitudes:** Se añadieron esperas cortas aleatorias y pausas periódicas para reducir ráfagas de solicitudes; no garantizan evitar límites o restricciones de la plataforma.
 - **Persistencia de Datos:** El estado de la Whitelist y la configuración de tiempos ahora se guardan en el navegador (`localStorage`).
 
 ### Cambiado
