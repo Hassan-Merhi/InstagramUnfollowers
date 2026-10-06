@@ -159,6 +159,7 @@ function App() {
   const [state, setState] = useState<State>(() => getInitialAppState());
   const scanningPausedRef = useRef(false);
   const scanCancelledRef = useRef(false);
+  const scanAbortControllerRef = useRef<AbortController | null>(null);
   const allowUnloadRef = useRef(false);
   const [scanningPaused, setScanningPaused] = useState(false);
 
@@ -239,6 +240,7 @@ function App() {
 
   const cancelScan = () => {
     scanCancelledRef.current = true;
+    scanAbortControllerRef.current?.abort();
     scanningPausedRef.current = false;
     setScanningPaused(false);
     setToast({
@@ -290,6 +292,7 @@ function App() {
     }
     clearScanSession();
     scanCancelledRef.current = false;
+    scanAbortControllerRef.current = new AbortController();
     scanningPausedRef.current = false;
     setScanningPaused(false);
     if (isLocalPreview) {
@@ -534,8 +537,20 @@ function App() {
           return { ok: false, blocked: false };
         }
         try {
-          return { ok: true, page: await fetchFriendshipsPage(kind, maxId, count) };
+          return {
+            ok: true,
+            page: await fetchFriendshipsPage(
+              kind,
+              maxId,
+              count,
+              undefined,
+              scanAbortControllerRef.current?.signal,
+            ),
+          };
         } catch (e: any) {
+          if (scanCancelledRef.current || e?.name === "AbortError") {
+            return { ok: false, blocked: false };
+          }
           const status = e?.status;
           const message = String(e?.message ?? "");
           const isRateLimitOrSoftBlock =
