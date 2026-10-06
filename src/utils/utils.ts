@@ -160,6 +160,10 @@ export function getCookie(name: string): string | null {
 }
 
 export function unfollowUserUrlGenerator(idToUnfollow: string): string {
+  return `https://www.instagram.com/api/v1/friendships/destroy/${idToUnfollow}/`;
+}
+
+export function legacyUnfollowUserUrlGenerator(idToUnfollow: string): string {
   return `https://www.instagram.com/web/friendships/${idToUnfollow}/unfollow/`;
 }
 
@@ -210,6 +214,45 @@ export class InstagramApiError extends Error {
     this.name = 'InstagramApiError';
     this.status = status;
   }
+}
+
+export interface FriendshipStatus {
+  readonly status?: string;
+  readonly following: boolean;
+  readonly followed_by?: boolean;
+  readonly incoming_request?: boolean;
+  readonly outgoing_request?: boolean;
+  readonly is_private?: boolean;
+}
+
+export async function fetchFriendshipStatus(userId: string): Promise<FriendshipStatus> {
+  const csrftoken = getCookie('csrftoken') || '';
+  const headers: Record<string, string> = {
+    'X-IG-App-ID': INSTAGRAM_WEB_APP_ID,
+    'X-ASBD-ID': INSTAGRAM_ASBD_ID,
+    'X-Requested-With': 'XMLHttpRequest',
+    'Accept': '*/*',
+  };
+  if (csrftoken) {
+    headers['X-CSRFToken'] = csrftoken;
+  }
+
+  const response = await fetch(`https://www.instagram.com/api/v1/friendships/show/${encodeURIComponent(userId)}/`, {
+    credentials: 'same-origin',
+    headers,
+  });
+  if (!response.ok) {
+    throw new InstagramApiError(response.status, `Instagram returned HTTP ${response.status} while verifying friendship status`);
+  }
+
+  const data = (await response.json()) as any;
+  if (data?.status === 'fail' || typeof data?.following !== 'boolean') {
+    throw new InstagramApiError(
+      response.status,
+      data?.message || 'Instagram returned an invalid friendship status response',
+    );
+  }
+  return data as FriendshipStatus;
 }
 
 export async function fetchFriendshipsPage(kind: FriendshipsListKind, maxId?: string, count?: number, userId?: string): Promise<FriendshipsPage> {
