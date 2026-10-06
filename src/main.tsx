@@ -482,7 +482,7 @@ function App() {
       count?: number,
     ): Promise<PageResult> => {
       let retries = 0;
-      const maxRetries = 3;
+      const maxRetries = 4;
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       while (true) {
         try {
