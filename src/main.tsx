@@ -168,24 +168,6 @@ function App() {
     setScanningPaused(nextPaused);
   };
 
-  const cancelScan = () => {
-    scanCancelledRef.current = true;
-    scanningPausedRef.current = false;
-    setScanningPaused(false);
-    setToast({
-      show: true,
-      text: t(lang, "stoppingScan"),
-    });
-  };
-
-  const exitApp = () => {
-    if (isActiveProcess && !confirm(t(lang, "exitActiveConfirm"))) {
-      return;
-    }
-    allowUnloadRef.current = true;
-    location.reload();
-  };
-
   const [toast, setToast] = useState<{ readonly show: false } | { readonly show: true; readonly text: string }>({
     show: false,
   });
@@ -254,6 +236,24 @@ function App() {
     default:
       assertUnreachable(state);
   }
+
+  const cancelScan = () => {
+    scanCancelledRef.current = true;
+    scanningPausedRef.current = false;
+    setScanningPaused(false);
+    setToast({
+      show: true,
+      text: t(lang, "stoppingScan"),
+    });
+  };
+
+  const exitApp = () => {
+    if (isActiveProcess && !confirm(t(lang, "exitActiveConfirm"))) {
+      return;
+    }
+    allowUnloadRef.current = true;
+    location.reload();
+  };
 
   const onLoadCached = () => {
     if (!cachedScan || cachedScan.results.length === 0) {
