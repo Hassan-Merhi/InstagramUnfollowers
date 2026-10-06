@@ -108,7 +108,16 @@ export const mergeWhitelists = (
   imported: readonly UserNode[]
 ): readonly UserNode[] => {
   const existingIds = new Set(existing.map(user => user.id));
-  const uniqueImported = imported.filter(user => !existingIds.has(user.id));
+  const existingUsernames = new Set(existing.map(user => user.username.trim().toLowerCase()));
+  const uniqueImported = imported.filter(user => {
+    const username = user.username.trim().toLowerCase();
+    if (existingIds.has(user.id) || existingUsernames.has(username)) {
+      return false;
+    }
+    existingIds.add(user.id);
+    existingUsernames.add(username);
+    return true;
+  });
   return [...existing, ...uniqueImported];
 };
 
