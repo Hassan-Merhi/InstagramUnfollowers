@@ -42,7 +42,7 @@ import { Searching } from "./components/Searching";
 import { Toolbar } from "./components/Toolbar";
 import { Unfollowing } from "./components/Unfollowing";
 import { Timings } from "./model/timings";
-import { clearScanSession, loadCachedScanResults, loadScanSession, loadTimings, loadWhitelist, saveCachedScanResults, saveScanSession, saveTimings, saveWhitelist } from "./utils/whitelist-manager";
+import { clearCachedScanResults, clearScanSession, loadCachedScanResults, loadScanSession, loadTimings, loadWhitelist, saveCachedScanResults, saveScanSession, saveTimings, saveWhitelist } from "./utils/whitelist-manager";
 import { getInitialLanguage, Language, saveLanguage, t } from "./utils/i18n";
 
 const LOCAL_PREVIEW_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
@@ -890,10 +890,26 @@ function App() {
 
       const csrftoken = getCookie("csrftoken");
       if (csrftoken === null) {
-        throw new Error("csrftoken cookie is null");
+        setState(prevState => {
+          if (prevState.status !== "unfollowing") {
+            return prevState;
+          }
+          return {
+            ...prevState,
+            percentage: 100,
+            unfollowLog: prevState.selectedResults.map(user => ({
+              user,
+              unfollowedSuccessfully: false,
+            })),
+          };
+        });
+        setToast({ show: true, text: t(lang, "sessionExpired") });
+        return;
       }
 
       let counter = 0;
+      let successfulUnfollows = 0;
+      let queueStoppedEarly = false;
       for (const user of state.selectedResults) {
         counter += 1;
         // Fix: Changed from Math.floor to Math.round to ensure progress reaches 100%
@@ -986,6 +1002,8 @@ function App() {
           }
           if (!success) {
             console.warn(`Unfollow for ${user.username} failed (HTTP ${res.status}):`, data);
+          } else {
+            successfulUnfollows += 1;
           }
           setState(prevState => {
             if (prevState.status !== "unfollowing") {
@@ -1005,6 +1023,7 @@ function App() {
           });
 
           if (isActionBlocked) {
+            queueStoppedEarly = true;
             setToast({
               show: true,
               text: t(lang, "actionBlockedWarning"),
@@ -1043,6 +1062,22 @@ function App() {
           });
           await sleep(timings.timeToWaitAfterFiveUnfollows);
         }
+        setToast({ show: false });
+      }
+
+      if (successfulUnfollows > 0) {
+        clearCachedScanResults();
+        clearScanSession();
+        setCachedScan(null);
+      }
+
+      setState(prevState =>
+        prevState.status === "unfollowing"
+          ? { ...prevState, percentage: 100 }
+          : prevState,
+      );
+
+      if (!queueStoppedEarly) {
         setToast({ show: false });
       }
     };
