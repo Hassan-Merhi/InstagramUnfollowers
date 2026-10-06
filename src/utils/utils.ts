@@ -5,50 +5,86 @@ import { ScanningFilter } from "../model/scanning-filter";
 import { UnfollowLogEntry } from "../model/unfollow-log-entry";
 import { UnfollowFilter } from "../model/unfollow-filter";
 
-export async function copyListToClipboard(nonFollowersList: readonly UserNode[], alertMessage: string = 'List copied to clipboard!'): Promise<void> {
-  const sortedList = [...nonFollowersList].sort((a, b) => (a.username > b.username ? 1 : -1));
+const normalizeUsername = (username: string): string =>
+  username.replace(/^@+/, "").trim().toLowerCase();
 
-  let output = '';
-  sortedList.forEach(user => {
-    output += user.username + '\n';
-  });
-
-  await navigator.clipboard.writeText(output);
-  alert(alertMessage);
-}
-
-export function exportToJSON(users: readonly UserNode[]) {
-  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(users, null, 2));
-  const downloadAnchorNode = document.createElement('a');
-  downloadAnchorNode.setAttribute("href",     dataStr);
-  downloadAnchorNode.setAttribute("download", "instagram_unfollowers.json");
-  document.body.appendChild(downloadAnchorNode);
-  downloadAnchorNode.click();
-  downloadAnchorNode.remove();
-}
-
-export function exportToCSV(users: readonly UserNode[]) {
-  const headers = ['id', 'username', 'full_name', 'is_verified', 'is_private', 'profile_pic_url'];
-  const rows = users.map(user => [
-    user.id,
-    user.username,
-    `"${user.full_name.replace(/"/g, '""')}"`,
-    user.is_verified,
-    user.is_private,
-    user.profile_pic_url
-  ]);
-  
-  const csvContent = "data:text/csv;charset=utf-8," 
-    + headers.join(",") + "\n" 
-    + rows.map(e => e.join(",")).join("\n");
-
-  const encodedUri = encodeURI(csvContent);
+const downloadTextFile = (content: string, mimeType: string, filename: string): void => {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
-  link.setAttribute("href", encodedUri);
-  link.setAttribute("download", "instagram_unfollowers.csv");
+  link.href = url;
+  link.download = filename;
   document.body.appendChild(link);
   link.click();
   link.remove();
+  URL.revokeObjectURL(url);
+};
+
+const exportDateStamp = (): string => new Date().toISOString().replace(/[:.]/g, "-");
+
+export async function copyListToClipboard(
+  nonFollowersList: readonly UserNode[],
+  alertMessage: string = "List copied to clipboard!",
+): Promise<void> {
+  const output = [...nonFollowersList]
+    .sort((a, b) => a.username.localeCompare(b.username))
+    .map(user => user.username)
+    .join("\n");
+
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(output);
+    } else {
+      throw new Error("Clipboard API unavailable");
+    }
+  } catch {
+    const textarea = document.createElement("textarea");
+    textarea.value = output;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand("copy");
+    textarea.remove();
+  }
+  alert(alertMessage);
+}
+
+export function exportToJSON(users: readonly UserNode[]): void {
+  downloadTextFile(
+    JSON.stringify(users, null, 2),
+    "application/json;charset=utf-8",
+    `instagram_unfollowers_${exportDateStamp()}.json`,
+  );
+}
+
+const csvEscape = (value: string | number | boolean): string => {
+  const text = String(value);
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+};
+
+export function exportToCSV(users: readonly UserNode[]): void {
+  const headers = ["id", "username", "full_name", "is_verified", "is_private", "profile_pic_url"];
+  const rows = users.map(user => [
+    user.id,
+    user.username,
+    user.full_name,
+    user.is_verified,
+    user.is_private,
+    user.profile_pic_url,
+  ]);
+
+  const csv = [
+    headers.map(csvEscape).join(","),
+    ...rows.map(row => row.map(csvEscape).join(",")),
+  ].join("\r\n");
+
+  downloadTextFile(
+    csv,
+    "text/csv;charset=utf-8",
+    `instagram_unfollowers_${exportDateStamp()}.csv`,
+  );
 }
 
 export function getMaxPage(nonFollowersList: readonly UserNode[]): number {
@@ -76,9 +112,14 @@ export function getUsersForDisplay(
 ): readonly UserNode[] {
   const users: UserNode[] = [];
   const whitelistedIds = new Set(whitelistedResults.map(user => user.id));
+  const whitelistedUsernames = new Set(
+    whitelistedResults.map(user => normalizeUsername(user.username)),
+  );
   const normalizedSearchTerm = searchTerm.trim().toLowerCase();
   for (const result of results) {
-    const isWhitelisted = whitelistedIds.has(result.id);
+    const isWhitelisted =
+      whitelistedIds.has(result.id) ||
+      whitelistedUsernames.has(normalizeUsername(result.username));
     switch (currentTab) {
       case "non_whitelisted":
         if (isWhitelisted) {
@@ -94,6 +135,9 @@ export function getUsersForDisplay(
         assertUnreachable(currentTab);
     }
     if (!filter.showPrivate && result.is_private) {
+      continue;
+    }
+    if (!filter.showPublic && !result.is_private) {
       continue;
     }
     if (!filter.showVerified && result.is_verified) {
