@@ -1,5 +1,5 @@
 import React, { useRef, useState } from "react";
-import { Typename, UserNode } from "../model/user";
+import { UserNode } from "../model/user";
 import { exportWhitelist, importWhitelist, clearWhitelist, mergeWhitelists } from "../utils/whitelist-manager";
 import { Language, t } from "../utils/i18n";
 
@@ -15,6 +15,7 @@ export const WhitelistManager = ({ whitelistedUsers, onWhitelistUpdate, lang }: 
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [showPasteArea, setShowPasteArea] = useState(false);
   const [pasteText, setPasteText] = useState("");
+  const [pasteMode, setPasteMode] = useState<"add" | "remove">("add");
 
   const handleExport = () => {
     exportWhitelist(whitelistedUsers);
@@ -76,8 +77,8 @@ export const WhitelistManager = ({ whitelistedUsers, onWhitelistUpdate, lang }: 
   const handlePasteSubmit = () => {
     const rawTokens = pasteText
       .split(/[\s,;\n\r\t]+/)
-      .map(s => s.replace(/^@+/, '').trim().toLowerCase())
-      .filter(s => s.length > 0 && /^[a-zA-Z0-9._]+$/.test(s));
+      .map(value => value.replace(/^@+/, "").trim().toLowerCase())
+      .filter(value => value.length > 0 && /^[a-zA-Z0-9._]+$/.test(value));
 
     if (rawTokens.length === 0) {
       setMessage({ type: "error", text: t(lang, "noValidUsernamesFound") });
@@ -86,17 +87,42 @@ export const WhitelistManager = ({ whitelistedUsers, onWhitelistUpdate, lang }: 
     }
 
     const uniqueUsernames = Array.from(new Set(rawTokens));
-    const existingUsernames = new Set(whitelistedUsers.map(u => u.username.toLowerCase()));
-    const toAdd = uniqueUsernames.filter(u => !existingUsernames.has(u));
+    const targetUsernames = new Set(uniqueUsernames);
+
+    if (pasteMode === "remove") {
+      const updated = whitelistedUsers.filter(
+        user => !targetUsernames.has(user.username.trim().toLowerCase()),
+      );
+      const removedCount = whitelistedUsers.length - updated.length;
+      if (removedCount === 0) {
+        setMessage({ type: "error", text: t(lang, "noPastedUsersMatched") });
+        setTimeout(() => setMessage(null), 4000);
+        return;
+      }
+      onWhitelistUpdate(updated);
+      setPasteText("");
+      setMessage({
+        type: "success",
+        text: t(lang, "pastedUsersRemoved", removedCount),
+      });
+      setTimeout(() => setMessage(null), 5000);
+      return;
+    }
+
+    const existingUsernames = new Set(
+      whitelistedUsers.map(user => user.username.trim().toLowerCase()),
+    );
+    const toAdd = uniqueUsernames.filter(username => !existingUsernames.has(username));
 
     if (toAdd.length === 0) {
-      setMessage({ type: "success", text: "All pasted users are already in the whitelist." });
+      setMessage({ type: "success", text: t(lang, "pastedUsersAlreadyExist") });
       setTimeout(() => setMessage(null), 4000);
       return;
     }
 
-    const newNodes: UserNode[] = toAdd.map(username => ({
-      id: `pasted_${username}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    const createdAt = Date.now();
+    const newNodes: UserNode[] = toAdd.map((username, index) => ({
+      id: `pasted_${username}_${createdAt}_${index}`,
       username,
       full_name: username,
       profile_pic_url: `https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(username)}&backgroundColor=0f172a,1f2937,312e81&fontFamily=Verdana`,
@@ -105,25 +131,10 @@ export const WhitelistManager = ({ whitelistedUsers, onWhitelistUpdate, lang }: 
       followed_by_viewer: true,
       follows_viewer: false,
       requested_by_viewer: false,
-      reel: {
-        id: `pasted_${username}_${Date.now()}`,
-        expiring_at: 0,
-        has_pride_media: false,
-        latest_reel_media: 0,
-        seen: null,
-        owner: {
-          __typename: Typename.GraphUser,
-          id: `pasted_${username}_${Date.now()}`,
-          profile_pic_url: `https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(username)}`,
-          username,
-        },
-      },
     }));
 
-    const updated = [...whitelistedUsers, ...newNodes];
-    onWhitelistUpdate(updated);
+    onWhitelistUpdate([...whitelistedUsers, ...newNodes]);
     setPasteText("");
-    setShowPasteArea(false);
     setMessage({
       type: "success",
       text: t(lang, "pastedUsersAdded", newNodes.length),
@@ -217,6 +228,22 @@ export const WhitelistManager = ({ whitelistedUsers, onWhitelistUpdate, lang }: 
 
       {showPasteArea && (
         <div className="paste-whitelist-box">
+          <div className="paste-mode-toggle" role="group" aria-label={t(lang, "pasteWhitelist")}>
+            <button
+              type="button"
+              className={`btn ${pasteMode === "add" ? "active" : ""}`}
+              onClick={() => setPasteMode("add")}
+            >
+              ➕ {t(lang, "addPastedToWhitelist")}
+            </button>
+            <button
+              type="button"
+              className={`btn ${pasteMode === "remove" ? "active" : ""}`}
+              onClick={() => setPasteMode("remove")}
+            >
+              ➖ {t(lang, "removePastedFromWhitelist")}
+            </button>
+          </div>
           <textarea
             className="paste-whitelist-textarea"
             placeholder={t(lang, "pasteWhitelistPlaceholder")}
@@ -229,7 +256,10 @@ export const WhitelistManager = ({ whitelistedUsers, onWhitelistUpdate, lang }: 
             className="btn btn-paste-submit"
             onClick={handlePasteSubmit}
           >
-            ➕ {t(lang, "addPastedToWhitelist")}
+            {pasteMode === "add" ? "➕" : "➖"}{" "}
+            {pasteMode === "add"
+              ? t(lang, "addPastedToWhitelist")
+              : t(lang, "removePastedFromWhitelist")}
           </button>
         </div>
       )}
