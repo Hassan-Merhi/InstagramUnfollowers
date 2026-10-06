@@ -275,12 +275,25 @@ export async function fetchFriendshipsPage(kind: FriendshipsListKind, maxId?: st
     credentials: 'same-origin',
     headers,
   });
-  if (!response.ok) {
-    throw new InstagramApiError(response.status, `Instagram returned HTTP ${response.status} while fetching ${kind}`);
+  const rawBody = await response.text();
+  let data: any = null;
+  try {
+    data = JSON.parse(rawBody);
+  } catch {
+    // HTML/login/error pages are handled below as an invalid response.
   }
-  const data = (await response.json()) as any;
-  if (data?.status === 'fail' || (!data?.users && data?.message)) {
-    throw new InstagramApiError(response.status, data?.message || `Instagram returned failure status while fetching ${kind}`);
+
+  if (!response.ok) {
+    throw new InstagramApiError(
+      response.status,
+      data?.message || `Instagram returned HTTP ${response.status} while fetching ${kind}`,
+    );
+  }
+  if (data?.status === 'fail' || !Array.isArray(data?.users)) {
+    throw new InstagramApiError(
+      response.status,
+      data?.message || `Instagram returned an invalid response while fetching ${kind}`,
+    );
   }
   return data as FriendshipsPage;
 }
