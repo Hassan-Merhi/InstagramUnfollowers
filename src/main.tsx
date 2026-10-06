@@ -524,8 +524,7 @@ function App() {
         return;
       }
 
-      const viewerId = getCookie("ds_user_id");
-      if (viewerId === null) {
+      if (getCookie("ds_user_id") === null) {
         setState(prevState =>
           prevState.status === "scanning" ? { ...prevState, isScanningActive: false } : prevState,
         );
