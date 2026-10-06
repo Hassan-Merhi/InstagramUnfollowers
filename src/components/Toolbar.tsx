@@ -20,6 +20,7 @@ interface ToolBarProps {
   onWhitelistUpdate: (users: readonly UserNode[]) => void;
   lang: Language;
   onLanguageChange: (lang: Language) => void;
+  onExit: () => void;
 }
 
 export const Toolbar = ({
@@ -34,6 +35,7 @@ export const Toolbar = ({
   onWhitelistUpdate,
   lang,
   onLanguageChange,
+  onExit,
 }: ToolBarProps) => {
 
   const [setingMenu, setSettingMenu] = useState(false);
@@ -109,26 +111,14 @@ export const Toolbar = ({
           <button
             className="copy-list"
             onClick={() => {
-              switch (state.status) {
-                case "scanning":
-                  return copyListToClipboard(
-                    getUsersForDisplay(
-                      state.results,
-                      state.whitelistedResults,
-                      state.currentTab,
-                      state.searchTerm,
-                      state.filter,
-                    ),
-                    t(lang, "copiedToClipboard")
-                  );
-                case "initial":
-                case "unfollowing":
-                  return;
-                default:
-                  assertUnreachable(state);
+              if (state.status === "scanning") {
+                return copyListToClipboard(
+                  displayedScanningUsers,
+                  t(lang, "copiedToClipboard"),
+                );
               }
             }}
-            disabled={state.status === "initial"}
+            disabled={state.status !== "scanning" || displayedScanningUsers.length === 0}
           >
             {t(lang, "copyList")}
           </button>
@@ -137,10 +127,10 @@ export const Toolbar = ({
             title={t(lang, "exportJson")}
             onClick={() => {
               if (state.status === "scanning") {
-                exportToJSON(getUsersForDisplay(state.results, state.whitelistedResults, state.currentTab, state.searchTerm, state.filter));
+                exportToJSON(displayedScanningUsers);
               }
             }}
-            disabled={state.status !== "scanning"}
+            disabled={state.status !== "scanning" || displayedScanningUsers.length === 0}
           >
             JSON
           </button>
@@ -149,10 +139,10 @@ export const Toolbar = ({
             title={t(lang, "exportCsv")}
             onClick={() => {
               if (state.status === "scanning") {
-                exportToCSV(getUsersForDisplay(state.results, state.whitelistedResults, state.currentTab, state.searchTerm, state.filter));
+                exportToCSV(displayedScanningUsers);
               }
             }}
-            disabled={state.status !== "scanning"}
+            disabled={state.status !== "scanning" || displayedScanningUsers.length === 0}
           >
             CSV
           </button>
@@ -172,6 +162,14 @@ export const Toolbar = ({
             onClick={() => { setSettingMenu(true); }}
           >
             <SettingIcon />
+          </button>
+          <button
+            className="copy-list exit-app"
+            type="button"
+            title={t(lang, "exit")}
+            onClick={onExit}
+          >
+            {t(lang, "exit")}
           </button>
         </div>
         <div className="toolbar-search">
