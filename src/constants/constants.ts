@@ -20,8 +20,8 @@ export const CHECKS_BEFORE_LONG_SLEEP = 15;
 export const RATE_LIMIT_COOLDOWN_SECONDS = 30;
 export const WHITELISTED_RESULTS_STORAGE_KEY = "iu_whitelisted-results";
 export const TIMINGS_STORAGE_KEY = "iu_timings";
-export const LAST_SCAN_RESULTS_STORAGE_KEY = "iu_last-scan-results";
-export const LAST_SCAN_TIMESTAMP_STORAGE_KEY = "iu_last-scan-time";
+export const LAST_SCAN_RESULTS_STORAGE_KEY = "iu_last-scan-results-v2";
+export const LAST_SCAN_TIMESTAMP_STORAGE_KEY = "iu_last-scan-time-v2";
 
 //TIMINGS CONSTANTS
 export const DEFAULT_TIME_BETWEEN_SEARCH_CYCLES = 1000;
