@@ -57,8 +57,10 @@ export function getMaxPage(nonFollowersList: readonly UserNode[]): number {
 }
 
 export function getCurrentPageUnfollowers(nonFollowersList: readonly UserNode[], currentPage: number): readonly UserNode[] {
-  const sortedList = [...nonFollowersList].sort((a, b) => (a.username > b.username ? 1 : -1));
-  return sortedList.splice(UNFOLLOWERS_PER_PAGE * (currentPage - 1), UNFOLLOWERS_PER_PAGE);
+  const sortedList = [...nonFollowersList].sort((a, b) => a.username.localeCompare(b.username));
+  const safePage = Math.min(Math.max(currentPage, 1), getMaxPage(sortedList));
+  const start = UNFOLLOWERS_PER_PAGE * (safePage - 1);
+  return sortedList.slice(start, start + UNFOLLOWERS_PER_PAGE);
 }
 
 export function isWithoutProfilePicture(user: UserNode): boolean {
@@ -73,8 +75,10 @@ export function getUsersForDisplay(
   filter: ScanningFilter,
 ): readonly UserNode[] {
   const users: UserNode[] = [];
+  const whitelistedIds = new Set(whitelistedResults.map(user => user.id));
+  const normalizedSearchTerm = searchTerm.trim().toLowerCase();
   for (const result of results) {
-    const isWhitelisted = whitelistedResults.find(user => user.id === result.id) !== undefined;
+    const isWhitelisted = whitelistedIds.has(result.id);
     switch (currentTab) {
       case "non_whitelisted":
         if (isWhitelisted) {
@@ -104,9 +108,9 @@ export function getUsersForDisplay(
       continue;
     }
     const userMatchesSearchTerm =
-      result.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      result.full_name.toLowerCase().includes(searchTerm.toLowerCase());
-    if (searchTerm !== "" && !userMatchesSearchTerm) {
+      result.username.toLowerCase().includes(normalizedSearchTerm) ||
+      result.full_name.toLowerCase().includes(normalizedSearchTerm);
+    if (normalizedSearchTerm !== "" && !userMatchesSearchTerm) {
       continue;
     }
     users.push(result);
@@ -194,7 +198,7 @@ export interface FriendshipsPage {
   readonly users?: readonly RawFriendshipUser[];
   // Instagram sometimes omits next_max_id even when has_more is true right
   // at the very end of a list; both are checked when deciding to continue.
-  readonly next_max_id?: string;
+  readonly next_max_id?: string | number;
   readonly has_more?: boolean;
 }
 
