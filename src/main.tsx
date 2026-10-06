@@ -258,7 +258,7 @@ function App() {
   };
 
   const onLoadCached = () => {
-    if (!cachedScan || cachedScan.results.length === 0) {
+    if (!cachedScan) {
       return;
     }
     const whitelistedResults = loadWhitelist();
@@ -304,12 +304,14 @@ function App() {
         currentTab: "non_whitelisted",
         percentage: 100,
         isScanningActive: false,
+        scanPhase: "complete",
         results: previewUsers,
         selectedResults: previewUsers.slice(0, 3),
         whitelistedResults: previewUsers.slice(10, 12),
         filter: {
           showVerified: true,
           showPrivate: true,
+          showPublic: true,
           showWithOutProfilePicture: true,
         },
       });
