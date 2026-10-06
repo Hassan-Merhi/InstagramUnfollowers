@@ -698,38 +698,57 @@ function App() {
             },
             method: "POST",
             credentials: "same-origin",
-            body: new URLSearchParams({ user_id: user.id }).toString(),
           };
 
-          let res = await fetch(unfollowUserUrlGenerator(user.id), requestOptions);
-          // The current v1 endpoint is preferred. Keep the older web route as
-          // a narrow compatibility fallback rather than treating a missing
-          // endpoint as a successful unfollow.
-          if (res.status === 404 || res.status === 405) {
-            res = await fetch(legacyUnfollowUserUrlGenerator(user.id), requestOptions);
+          const endpoints = [
+            unfollowUserUrlGenerator(user.id),
+            legacyUnfollowUserUrlGenerator(user.id),
+          ];
+          let res: Response | null = null;
+          let data: any = null;
+          let isActionBlocked = false;
+          let requestAccepted = false;
+
+          for (let endpointIndex = 0; endpointIndex < endpoints.length; endpointIndex++) {
+            if (endpointIndex > 0) {
+              await sleep(1200);
+            }
+
+            res = await fetch(endpoints[endpointIndex], requestOptions);
+            data = (await res.json().catch(() => null)) as any;
+            const message = String(data?.message ?? "");
+            isActionBlocked =
+              res.status === 401 ||
+              res.status === 403 ||
+              res.status === 429 ||
+              data?.feedback_required === true ||
+              data?.spam === true ||
+              data?.require_login === true ||
+              /feedback_required|checkpoint_required|checkpoint|challenge_required|action_blocked|login_required|please wait/i.test(
+                message,
+              );
+
+            requestAccepted =
+              res.ok &&
+              data !== null &&
+              (data?.status === "ok" || data?.friendship_status !== undefined) &&
+              !isActionBlocked;
+
+            if (requestAccepted || isActionBlocked) {
+              break;
+            }
           }
 
-          const data = (await res.json().catch(() => null)) as any;
-          let isActionBlocked =
-            res.status === 401 ||
-            res.status === 403 ||
-            res.status === 429 ||
-            data?.status === "fail" ||
-            data?.spam === true ||
-            /feedback_required|checkpoint_required|checkpoint|challenge_required|action_blocked|please wait/i.test(
-              data?.message ?? "",
-            );
+          if (res === null) {
+            throw new Error("No unfollow request was attempted");
+          }
 
           const responseConfirmsUnfollow =
             data?.friendship_status?.following === false || data?.following === false;
           const responseSaysStillFollowing =
             data?.friendship_status?.following === true || data?.following === true;
 
-          let success =
-            res.ok &&
-            data?.status !== "fail" &&
-            !isActionBlocked &&
-            !responseSaysStillFollowing;
+          let success = requestAccepted && !responseSaysStillFollowing;
 
           // The legacy web route often returns only {status:"ok"}. When the
           // response itself cannot prove the relationship changed, verify it
