@@ -303,7 +303,13 @@ export async function fetchFriendshipStatus(userId: string): Promise<FriendshipS
   return data as FriendshipStatus;
 }
 
-export async function fetchFriendshipsPage(kind: FriendshipsListKind, maxId?: string, count?: number, userId?: string): Promise<FriendshipsPage> {
+export async function fetchFriendshipsPage(
+  kind: FriendshipsListKind,
+  maxId?: string,
+  count?: number,
+  userId?: string,
+  signal?: AbortSignal,
+): Promise<FriendshipsPage> {
   const csrftoken = getCookie('csrftoken') || '';
   const headers: Record<string, string> = {
     'X-IG-App-ID': INSTAGRAM_WEB_APP_ID,
@@ -318,6 +324,7 @@ export async function fetchFriendshipsPage(kind: FriendshipsListKind, maxId?: st
   const response = await fetch(friendshipsUrlGenerator(kind, maxId, count, userId), {
     credentials: 'same-origin',
     headers,
+    signal,
   });
   const rawBody = await response.text();
   let data: any = null;
