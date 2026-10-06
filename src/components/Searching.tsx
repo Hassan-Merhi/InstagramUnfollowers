@@ -8,7 +8,7 @@ import { Language, t } from "../utils/i18n";
 
 export interface SearchingProps {
   state: State;
-  setState: (state: State) => void;
+  setState: React.Dispatch<React.SetStateAction<State>>;
   scanningPaused: boolean;
   pauseScan: () => void;
   handleScanFilter: (e: React.ChangeEvent<HTMLInputElement>) => void;
@@ -40,6 +40,29 @@ export const Searching = ({
     state.searchTerm,
     state.filter,
   );
+  const maxPage = getMaxPage(usersForDisplay);
+
+  const selectMatching = (predicate: (user: UserNode) => boolean) => {
+    setState(prevState => {
+      if (prevState.status !== "scanning") {
+        return prevState;
+      }
+      const displayed = getUsersForDisplay(
+        prevState.results,
+        prevState.whitelistedResults,
+        prevState.currentTab,
+        prevState.searchTerm,
+        prevState.filter,
+      );
+      const currentIds = new Set(prevState.selectedResults.map(user => user.id));
+      const toAdd = displayed.filter(user => predicate(user) && !currentIds.has(user.id));
+      return {
+        ...prevState,
+        selectedResults: [...prevState.selectedResults, ...toAdd],
+      };
+    });
+  };
+
   let currentLetter = "";
 
   const onNewLetter = (firstLetter: string) => {
@@ -48,38 +71,38 @@ export const Searching = ({
   };
 
   const handleSelectedWhitelistAction = () => {
-    if (state.selectedResults.length === 0) {
-      return;
-    }
-
-    let whitelistedResults: readonly UserNode[] = [];
-
-    switch (state.currentTab) {
-      case "non_whitelisted": {
-        const existingIds = new Set(state.whitelistedResults.map(user => user.id));
-        const usersToAdd = state.selectedResults.filter(user => !existingIds.has(user.id));
-        whitelistedResults = [...state.whitelistedResults, ...usersToAdd];
-        break;
+    setState(prevState => {
+      if (prevState.status !== "scanning" || prevState.selectedResults.length === 0) {
+        return prevState;
       }
 
-      case "whitelisted": {
-        const selectedIds = new Set(state.selectedResults.map(user => user.id));
-        whitelistedResults = state.whitelistedResults.filter(user => !selectedIds.has(user.id));
-        break;
+      let whitelistedResults: readonly UserNode[] = [];
+      switch (prevState.currentTab) {
+        case "non_whitelisted": {
+          const existingIds = new Set(prevState.whitelistedResults.map(user => user.id));
+          const usersToAdd = prevState.selectedResults.filter(user => !existingIds.has(user.id));
+          whitelistedResults = [...prevState.whitelistedResults, ...usersToAdd];
+          break;
+        }
+        case "whitelisted": {
+          const selectedIds = new Set(prevState.selectedResults.map(user => user.id));
+          whitelistedResults = prevState.whitelistedResults.filter(user => !selectedIds.has(user.id));
+          break;
+        }
+        default:
+          assertUnreachable(prevState.currentTab);
       }
 
-      default:
-        assertUnreachable(state.currentTab);
-    }
-
-    localStorage.setItem(
-      WHITELISTED_RESULTS_STORAGE_KEY,
-      JSON.stringify(whitelistedResults),
-    );
-    setState({
-      ...state,
-      whitelistedResults,
-      selectedResults: [],
+      localStorage.setItem(
+        WHITELISTED_RESULTS_STORAGE_KEY,
+        JSON.stringify(whitelistedResults),
+      );
+      return {
+        ...prevState,
+        page: 1,
+        whitelistedResults,
+        selectedResults: [],
+      };
     });
   };
 
@@ -125,40 +148,31 @@ export const Searching = ({
           <div className="sidebar-buttons-grid">
             <button
               className="button-secondary"
-              onClick={() => {
-                const verifiedUsers = usersForDisplay.filter(u => u.is_verified);
-                const currentIds = new Set(state.selectedResults.map(u => u.id));
-                const toAdd = verifiedUsers.filter(u => !currentIds.has(u.id));
-                setState({ ...state, selectedResults: [...state.selectedResults, ...toAdd] });
-              }}
+              onClick={() => selectMatching(user => user.is_verified)}
             >
               {t(lang, "verified")}
             </button>
             <button
               className="button-secondary"
-              onClick={() => {
-                const privateUsers = usersForDisplay.filter(u => u.is_private);
-                const currentIds = new Set(state.selectedResults.map(u => u.id));
-                const toAdd = privateUsers.filter(u => !currentIds.has(u.id));
-                setState({ ...state, selectedResults: [...state.selectedResults, ...toAdd] });
-              }}
+              onClick={() => selectMatching(user => user.is_private)}
             >
               {t(lang, "private")}
             </button>
             <button
               className="button-secondary"
-              onClick={() => {
-                const noPicUsers = usersForDisplay.filter(u => isWithoutProfilePicture(u));
-                const currentIds = new Set(state.selectedResults.map(u => u.id));
-                const toAdd = noPicUsers.filter(u => !currentIds.has(u.id));
-                setState({ ...state, selectedResults: [...state.selectedResults, ...toAdd] });
-              }}
+              onClick={() => selectMatching(user => isWithoutProfilePicture(user))}
             >
               {t(lang, "noPic")}
             </button>
             <button
               className="button-secondary danger-text"
-              onClick={() => setState({ ...state, selectedResults: [] })}
+              onClick={() =>
+                setState(prevState =>
+                  prevState.status === "scanning"
+                    ? { ...prevState, selectedResults: [] }
+                    : prevState,
+                )
+              }
             >
               {t(lang, "clear")}
             </button>
@@ -202,6 +216,7 @@ export const Searching = ({
             <button
               className="button-control button-pause"
               onClick={pauseScan}
+              disabled={!state.isScanningActive}
             >
               {scanningPaused ? t(lang, "resume") : t(lang, "pause")}
             </button>
@@ -209,27 +224,36 @@ export const Searching = ({
               <div className="pagination-controls">
                 <a
                   onClick={() => {
-                    if (state.page - 1 > 0) {
-                      setState({
-                        ...state,
-                        page: state.page - 1,
-                      });
-                    }
+                    setState(prevState =>
+                      prevState.status === "scanning" && prevState.page > 1
+                        ? { ...prevState, page: prevState.page - 1 }
+                        : prevState,
+                    );
                   }}
                 >
                   ❮
                 </a>
                 <span>
-                  {state.page}/{getMaxPage(usersForDisplay)}
+                  {Math.min(state.page, maxPage)}/{maxPage}
                 </span>
                 <a
                   onClick={() => {
-                    if (state.page < getMaxPage(usersForDisplay)) {
-                      setState({
-                        ...state,
-                        page: state.page + 1,
-                      });
-                    }
+                    setState(prevState => {
+                      if (prevState.status !== "scanning") {
+                        return prevState;
+                      }
+                      const displayed = getUsersForDisplay(
+                        prevState.results,
+                        prevState.whitelistedResults,
+                        prevState.currentTab,
+                        prevState.searchTerm,
+                        prevState.filter,
+                      );
+                      const nextMaxPage = getMaxPage(displayed);
+                      return prevState.page < nextMaxPage
+                        ? { ...prevState, page: prevState.page + 1 }
+                        : prevState;
+                    });
                   }}
                 >
                   ❯
@@ -297,11 +321,11 @@ export const Searching = ({
               if (state.currentTab === "non_whitelisted") {
                 return;
               }
-              setState({
-                ...state,
-                currentTab: "non_whitelisted",
-                page: 1,
-              });
+              setState(prevState =>
+                prevState.status === "scanning"
+                  ? { ...prevState, currentTab: "non_whitelisted", page: 1 }
+                  : prevState,
+              );
             }}
           >
             {t(lang, "nonWhitelistedTab")}
@@ -313,11 +337,11 @@ export const Searching = ({
               if (state.currentTab === "whitelisted") {
                 return;
               }
-              setState({
-                ...state,
-                currentTab: "whitelisted",
-                page: 1,
-              });
+              setState(prevState =>
+                prevState.status === "scanning"
+                  ? { ...prevState, currentTab: "whitelisted", page: 1 }
+                  : prevState,
+              );
             }}
           >
             {t(lang, "whitelistedTab")}
@@ -336,26 +360,38 @@ export const Searching = ({
                       // Prevent selecting result when trying to add to whitelist.
                       e.preventDefault();
                       e.stopPropagation();
-                      let whitelistedResults: readonly UserNode[] = [];
-                      switch (state.currentTab) {
-                        case "non_whitelisted":
-                          whitelistedResults = [...state.whitelistedResults, user];
-                          break;
-
-                        case "whitelisted":
-                          whitelistedResults = state.whitelistedResults.filter(
-                            result => result.id !== user.id,
-                          );
-                          break;
-
-                        default:
-                          assertUnreachable(state.currentTab);
-                      }
-                      localStorage.setItem(
-                        WHITELISTED_RESULTS_STORAGE_KEY,
-                        JSON.stringify(whitelistedResults),
-                      );
-                      setState({ ...state, whitelistedResults });
+                      setState(prevState => {
+                        if (prevState.status !== "scanning") {
+                          return prevState;
+                        }
+                        let whitelistedResults: readonly UserNode[] = [];
+                        switch (prevState.currentTab) {
+                          case "non_whitelisted":
+                            whitelistedResults = prevState.whitelistedResults.some(result => result.id === user.id)
+                              ? prevState.whitelistedResults
+                              : [...prevState.whitelistedResults, user];
+                            break;
+                          case "whitelisted":
+                            whitelistedResults = prevState.whitelistedResults.filter(
+                              result => result.id !== user.id,
+                            );
+                            break;
+                          default:
+                            assertUnreachable(prevState.currentTab);
+                        }
+                        localStorage.setItem(
+                          WHITELISTED_RESULTS_STORAGE_KEY,
+                          JSON.stringify(whitelistedResults),
+                        );
+                        return {
+                          ...prevState,
+                          page: 1,
+                          whitelistedResults,
+                          selectedResults: prevState.selectedResults.filter(
+                            selected => selected.id !== user.id,
+                          ),
+                        };
+                      });
                     }}
                   >
                     <img
@@ -393,7 +429,6 @@ export const Searching = ({
                   <input
                     className="account-checkbox"
                     type="checkbox"
-                    disabled={Boolean(state.isScanningActive)}
                     checked={state.selectedResults.some(result => result.id === user.id)}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => toggleUser(e.currentTarget.checked, user)}
                   />

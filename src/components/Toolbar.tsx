@@ -11,7 +11,7 @@ import { Language, t } from "../utils/i18n";
 interface ToolBarProps {
   isActiveProcess: boolean;
   state: State;
-  setState: (state: State) => void;
+  setState: React.Dispatch<React.SetStateAction<State>>;
   toggleAllUsers: (e: ChangeEvent<HTMLInputElement>) => void;
   toggleCurrentePageUsers: (e: ChangeEvent<HTMLInputElement>) => void;
   currentTimings: Timings;
@@ -37,6 +37,31 @@ export const Toolbar = ({
 }: ToolBarProps) => {
 
   const [setingMenu, setSettingMenu] = useState(false);
+
+  const displayedScanningUsers =
+    state.status === "scanning"
+      ? getUsersForDisplay(
+          state.results,
+          state.whitelistedResults,
+          state.currentTab,
+          state.searchTerm,
+          state.filter,
+        )
+      : [];
+  const currentScanningPage =
+    state.status === "scanning"
+      ? getCurrentPageUnfollowers(displayedScanningUsers, state.page)
+      : [];
+  const selectedIds =
+    state.status === "scanning"
+      ? new Set(state.selectedResults.map(user => user.id))
+      : new Set<string>();
+  const isPageSelected =
+    currentScanningPage.length > 0 &&
+    currentScanningPage.every(user => selectedIds.has(user.id));
+  const isAllDisplayedSelected =
+    displayedScanningUsers.length > 0 &&
+    displayedScanningUsers.every(user => selectedIds.has(user.id));
 
   return (
     <header className="app-header">
@@ -157,22 +182,26 @@ export const Toolbar = ({
             disabled={state.status === "initial"}
             value={state.status === "initial" ? "" : state.searchTerm}
             onChange={e => {
-              switch (state.status) {
-                case "initial":
-                  return;
-                case "scanning":
-                  return setState({
-                    ...state,
-                    searchTerm: e.currentTarget.value,
-                  });
-                case "unfollowing":
-                  return setState({
-                    ...state,
-                    searchTerm: e.currentTarget.value,
-                  });
-                default:
-                  assertUnreachable(state);
-              }
+              const value = e.currentTarget.value;
+              setState(prevState => {
+                switch (prevState.status) {
+                  case "initial":
+                    return prevState;
+                  case "scanning":
+                    return {
+                      ...prevState,
+                      page: 1,
+                      searchTerm: value,
+                    };
+                  case "unfollowing":
+                    return {
+                      ...prevState,
+                      searchTerm: value,
+                    };
+                  default:
+                    return assertUnreachable(prevState);
+                }
+              });
             }}
           />
           {state.status === "scanning" && (
@@ -180,15 +209,7 @@ export const Toolbar = ({
               <input
                 title={t(lang, "selectPage")}
                 type="checkbox"
-                // Avoid allowing selection only while the scan is actively fetching
-                disabled={Boolean(state.isScanningActive)}
-                checked={
-                  (() => {
-                    const displayed = getUsersForDisplay(state.results, state.whitelistedResults, state.currentTab, state.searchTerm, state.filter);
-                    const pageUsers = getCurrentPageUnfollowers(displayed, state.page);
-                    return pageUsers.length > 0 && pageUsers.every(u => state.selectedResults.some(s => s.id === u.id));
-                  })()
-                }
+                checked={isPageSelected}
                 className="toggle-all-checkbox"
                 onChange={toggleCurrentePageUsers}
               />
@@ -200,20 +221,7 @@ export const Toolbar = ({
               <input
                 title={t(lang, "selectAll")}
                 type="checkbox"
-                // Avoid allowing selection only while the scan is actively fetching
-                disabled={Boolean(state.isScanningActive)}
-                checked={
-                  (() => {
-                    const displayed = getUsersForDisplay(
-                      state.results,
-                      state.whitelistedResults,
-                      state.currentTab,
-                      state.searchTerm,
-                      state.filter,
-                    );
-                    return displayed.length > 0 && displayed.every(u => state.selectedResults.some(s => s.id === u.id));
-                  })()
-                }
+                checked={isAllDisplayedSelected}
                 className="toggle-all-checkbox"
                 onChange={toggleAllUsers}
               />

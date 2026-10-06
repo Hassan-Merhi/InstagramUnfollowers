@@ -1,6 +1,8 @@
 import { UserNode } from "../model/user";
 import { Timings } from "../model/timings";
-import { WHITELISTED_RESULTS_STORAGE_KEY, TIMINGS_STORAGE_KEY, LAST_SCAN_RESULTS_STORAGE_KEY, LAST_SCAN_TIMESTAMP_STORAGE_KEY } from "../constants/constants";
+import { WHITELISTED_RESULTS_STORAGE_KEY, TIMINGS_STORAGE_KEY, LAST_SCAN_RESULTS_STORAGE_KEY, LAST_SCAN_TIMESTAMP_STORAGE_KEY, SCAN_SESSION_STORAGE_KEY } from "../constants/constants";
+import { ScanningFilter } from "../model/scanning-filter";
+import { ScanningTab } from "../model/scanning-tab";
 
 /**
  * Export whitelist to a JSON file
@@ -175,5 +177,62 @@ export const loadCachedScanResults = (): { results: readonly UserNode[]; timesta
     };
   } catch {
     return null;
+  }
+};
+
+
+export interface ScanSessionSnapshot {
+  readonly page: number;
+  readonly currentTab: ScanningTab;
+  readonly searchTerm: string;
+  readonly selectedIds: readonly string[];
+  readonly filter: ScanningFilter;
+  readonly scanIncomplete: boolean;
+  readonly timestamp: number;
+}
+
+const isScanSessionSnapshot = (value: unknown): value is ScanSessionSnapshot => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const snapshot = value as Partial<ScanSessionSnapshot>;
+  return (
+    typeof snapshot.page === "number" &&
+    (snapshot.currentTab === "non_whitelisted" || snapshot.currentTab === "whitelisted") &&
+    typeof snapshot.searchTerm === "string" &&
+    Array.isArray(snapshot.selectedIds) &&
+    typeof snapshot.filter === "object" &&
+    snapshot.filter !== null &&
+    typeof snapshot.scanIncomplete === "boolean" &&
+    typeof snapshot.timestamp === "number"
+  );
+};
+
+export const saveScanSession = (snapshot: ScanSessionSnapshot): void => {
+  try {
+    sessionStorage.setItem(SCAN_SESSION_STORAGE_KEY, JSON.stringify(snapshot));
+  } catch (e) {
+    console.warn("Could not save scan session:", e);
+  }
+};
+
+export const loadScanSession = (): ScanSessionSnapshot | null => {
+  try {
+    const raw = sessionStorage.getItem(SCAN_SESSION_STORAGE_KEY);
+    if (!raw) {
+      return null;
+    }
+    const parsed: unknown = JSON.parse(raw);
+    return isScanSessionSnapshot(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
+export const clearScanSession = (): void => {
+  try {
+    sessionStorage.removeItem(SCAN_SESSION_STORAGE_KEY);
+  } catch {
+    // Ignore storage errors.
   }
 };
