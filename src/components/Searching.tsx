@@ -43,12 +43,13 @@ export const Searching = ({
     state.filter,
   );
   const maxPage = getMaxPage(usersForDisplay);
-  const scanPhaseLabel =
-    state.scanPhase === "followers"
-      ? t(lang, "scanPhaseFollowers")
-      : state.scanPhase === "following"
-      ? t(lang, "scanPhaseFollowing")
-      : t(lang, "scanPhaseComplete");
+  const scanPhaseLabel = state.scanIncomplete
+    ? t(lang, "scanPhaseIncomplete")
+    : state.scanPhase === "followers"
+    ? t(lang, "scanPhaseFollowers")
+    : state.scanPhase === "following"
+    ? t(lang, "scanPhaseFollowing")
+    : t(lang, "scanPhaseComplete");
 
   const selectMatching = (predicate: (user: UserNode) => boolean) => {
     setState(prevState => {
@@ -177,6 +178,12 @@ export const Searching = ({
               onClick={() => selectMatching(user => user.is_private)}
             >
               {t(lang, "private")}
+            </button>
+            <button
+              className="button-secondary"
+              onClick={() => selectMatching(user => !user.is_private)}
+            >
+              {t(lang, "public")}
             </button>
             <button
               className="button-secondary"
