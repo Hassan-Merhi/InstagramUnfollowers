@@ -185,7 +185,6 @@ export interface ScanSessionSnapshot {
   readonly page: number;
   readonly currentTab: ScanningTab;
   readonly searchTerm: string;
-  readonly results: readonly UserNode[];
   readonly selectedIds: readonly string[];
   readonly filter: ScanningFilter;
   readonly scanIncomplete: boolean;
@@ -201,7 +200,6 @@ const isScanSessionSnapshot = (value: unknown): value is ScanSessionSnapshot => 
     typeof snapshot.page === "number" &&
     (snapshot.currentTab === "non_whitelisted" || snapshot.currentTab === "whitelisted") &&
     typeof snapshot.searchTerm === "string" &&
-    Array.isArray(snapshot.results) &&
     Array.isArray(snapshot.selectedIds) &&
     typeof snapshot.filter === "object" &&
     snapshot.filter !== null &&
