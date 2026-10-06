@@ -4,6 +4,74 @@ import { WHITELISTED_RESULTS_STORAGE_KEY, TIMINGS_STORAGE_KEY, LAST_SCAN_RESULTS
 import { ScanningFilter } from "../model/scanning-filter";
 import { ScanningTab } from "../model/scanning-tab";
 
+const MAX_WHITELIST_IMPORT_BYTES = 5 * 1024 * 1024;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const normalizeWhitelistUser = (value: unknown): UserNode | null => {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const id = typeof value.id === "string" ? value.id.trim() : "";
+  const username = typeof value.username === "string" ? value.username.replace(/^@+/, "").trim().toLowerCase() : "";
+  if (id === "" || username === "" || !/^[a-zA-Z0-9._]+$/.test(username)) {
+    return null;
+  }
+  return {
+    id,
+    username,
+    full_name: typeof value.full_name === "string" ? value.full_name : username,
+    profile_pic_url: typeof value.profile_pic_url === "string" ? value.profile_pic_url : "",
+    is_private: typeof value.is_private === "boolean" ? value.is_private : false,
+    is_verified: typeof value.is_verified === "boolean" ? value.is_verified : false,
+    followed_by_viewer: typeof value.followed_by_viewer === "boolean" ? value.followed_by_viewer : true,
+    follows_viewer: typeof value.follows_viewer === "boolean" ? value.follows_viewer : false,
+    requested_by_viewer: typeof value.requested_by_viewer === "boolean" ? value.requested_by_viewer : false,
+  };
+};
+
+const normalizeWhitelistArray = (value: unknown): readonly UserNode[] | null => {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const normalized = value.map(normalizeWhitelistUser);
+  if (normalized.some(user => user === null)) {
+    return null;
+  }
+  const ids = new Set<string>();
+  const usernames = new Set<string>();
+  const unique: UserNode[] = [];
+  for (const user of normalized as UserNode[]) {
+    if (ids.has(user.id) || usernames.has(user.username)) {
+      continue;
+    }
+    ids.add(user.id);
+    usernames.add(user.username);
+    unique.push(user);
+  }
+  return unique;
+};
+
+const isCachedUser = (value: unknown): value is UserNode => {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    typeof value.id === "string" &&
+    value.id.length > 0 &&
+    typeof value.username === "string" &&
+    value.username.length > 0 &&
+    typeof value.full_name === "string" &&
+    typeof value.profile_pic_url === "string" &&
+    typeof value.is_private === "boolean" &&
+    typeof value.is_verified === "boolean" &&
+    typeof value.followed_by_viewer === "boolean" &&
+    typeof value.follows_viewer === "boolean" &&
+    typeof value.requested_by_viewer === "boolean"
+  );
+};
+
 /**
  * Export whitelist to a JSON file
  */
@@ -35,32 +103,22 @@ export const importWhitelist = (
   onSuccess: (users: readonly UserNode[]) => void,
   onError: (message: string) => void
 ): void => {
+  if (file.size > MAX_WHITELIST_IMPORT_BYTES) {
+    onError("Whitelist file is too large (maximum 5 MB)");
+    return;
+  }
+
   const reader = new FileReader();
-  
+
   reader.onload = (e) => {
     try {
-      const content = e.target?.result as string;
-      const importedUsers = JSON.parse(content) as UserNode[];
-      
-      // Validate the imported data
-      if (!Array.isArray(importedUsers)) {
-        onError("Invalid file format: Expected an array of users");
+      const content = typeof e.target?.result === "string" ? e.target.result : "";
+      const parsed: unknown = JSON.parse(content);
+      const importedUsers = normalizeWhitelistArray(parsed);
+      if (importedUsers === null) {
+        onError("Invalid whitelist format: every entry must contain a valid id and username");
         return;
       }
-      
-      // Basic validation of user structure
-      const isValid = importedUsers.every(user => 
-        user.id && 
-        user.username && 
-        typeof user.id === "string" && 
-        typeof user.username === "string"
-      );
-      
-      if (!isValid) {
-        onError("Invalid file format: Users missing required fields (id, username)");
-        return;
-      }
-      
       onSuccess(importedUsers);
     } catch (error) {
       onError(`Failed to parse JSON file: ${error instanceof Error ? error.message : "Unknown error"}`);
@@ -89,8 +147,15 @@ export const clearWhitelist = (): void => {
  * Load whitelist from localStorage
  */
 export const loadWhitelist = (): readonly UserNode[] => {
-  const whitelistedResultsFromStorage = localStorage.getItem(WHITELISTED_RESULTS_STORAGE_KEY);
-  return whitelistedResultsFromStorage === null ? [] : JSON.parse(whitelistedResultsFromStorage);
+  try {
+    const raw = localStorage.getItem(WHITELISTED_RESULTS_STORAGE_KEY);
+    if (raw === null) {
+      return [];
+    }
+    return normalizeWhitelistArray(JSON.parse(raw)) ?? [];
+  } catch {
+    return [];
+  }
 };
 
 /**
@@ -121,12 +186,21 @@ export const mergeWhitelists = (
   return [...existing, ...uniqueImported];
 };
 
+const isFiniteNumberInRange = (value: unknown, min: number, max: number): value is number =>
+  typeof value === "number" && Number.isFinite(value) && value >= min && value <= max;
+
 const isTimings = (value: unknown): value is Timings => {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+  if (!isRecord(value)) {
     return false;
   }
-
-  return Object.values(value).every((timing) => typeof timing === "number");
+  return (
+    isFiniteNumberInRange(value.timeBetweenSearchCycles, 500, 999999) &&
+    isFiniteNumberInRange(value.timeToWaitAfterFiveSearchCycles, 4000, 999999) &&
+    isFiniteNumberInRange(value.timeBetweenUnfollows, 1000, 999999) &&
+    isFiniteNumberInRange(value.timeToWaitAfterFiveUnfollows, 70000, 999999) &&
+    (value.usersPerSearchCycle === undefined ||
+      isFiniteNumberInRange(value.usersPerSearchCycle, 1, 200))
+  );
 };
 
 /**
@@ -176,19 +250,34 @@ export const loadCachedScanResults = (): { results: readonly UserNode[]; timesta
     if (!raw || !time) {
       return null;
     }
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
+    const parsed: unknown = JSON.parse(raw);
+    const timestamp = Number(time);
+    if (
+      !Array.isArray(parsed) ||
+      !parsed.every(isCachedUser) ||
+      !Number.isFinite(timestamp) ||
+      timestamp <= 0
+    ) {
       return null;
     }
     return {
-      results: parsed as readonly UserNode[],
-      timestamp: Number(time),
+      results: parsed,
+      timestamp,
     };
   } catch {
     return null;
   }
 };
 
+
+export const clearCachedScanResults = (): void => {
+  try {
+    localStorage.removeItem(LAST_SCAN_RESULTS_STORAGE_KEY);
+    localStorage.removeItem(LAST_SCAN_TIMESTAMP_STORAGE_KEY);
+  } catch {
+    // Ignore storage errors.
+  }
+};
 
 export interface ScanSessionSnapshot {
   readonly page: number;
@@ -205,15 +294,24 @@ const isScanSessionSnapshot = (value: unknown): value is ScanSessionSnapshot => 
     return false;
   }
   const snapshot = value as Partial<ScanSessionSnapshot>;
+  const filter = snapshot.filter as Partial<ScanningFilter> | undefined;
   return (
-    typeof snapshot.page === "number" &&
+    Number.isInteger(snapshot.page) &&
+    Number(snapshot.page) >= 1 &&
     (snapshot.currentTab === "non_whitelisted" || snapshot.currentTab === "whitelisted") &&
     typeof snapshot.searchTerm === "string" &&
+    snapshot.searchTerm.length <= 500 &&
     Array.isArray(snapshot.selectedIds) &&
-    typeof snapshot.filter === "object" &&
-    snapshot.filter !== null &&
+    snapshot.selectedIds.every(id => typeof id === "string") &&
+    filter !== undefined &&
+    typeof filter.showVerified === "boolean" &&
+    typeof filter.showPrivate === "boolean" &&
+    typeof filter.showPublic === "boolean" &&
+    typeof filter.showWithOutProfilePicture === "boolean" &&
     typeof snapshot.scanIncomplete === "boolean" &&
-    typeof snapshot.timestamp === "number"
+    typeof snapshot.timestamp === "number" &&
+    Number.isFinite(snapshot.timestamp) &&
+    snapshot.timestamp > 0
   );
 };
 
