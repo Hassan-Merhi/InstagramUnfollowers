@@ -1,6 +1,6 @@
 # 📱 Instagram Unfollowers
 
-[![Maintenance](https://img.shields.io/maintenance/yes/2026)](https://github.com/davidarroyo1234/InstagramUnfollowers)
+[![Maintenance](https://img.shields.io/maintenance/yes/2026)](https://github.com/Hassan-Merhi/InstagramUnfollowers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 [🇬🇧 English](#-english) | [🇪🇸 Español](#-español)
@@ -17,7 +17,7 @@ A nifty tool that lets you see who doesn't follow you back on Instagram.
 
 ### 🖥️ Desktop Usage
 
-1. Copy the code from: [InstagramUnfollowers Tool](https://davidarroyo1234.github.io/InstagramUnfollowers/)
+1. Use the current build from [Hassan-Merhi/InstagramUnfollowers](https://github.com/Hassan-Merhi/InstagramUnfollowers). After GitHub Pages is enabled for this repo, the Pages deployment can be published manually from the Actions workflow.
 2. Press the COPY button to copy the code:
    <br/><img src="./assets/copy_code.png" alt="Copy code button" />
 3. Go to the Instagram website and log in to your account.
@@ -54,14 +54,14 @@ For Android users who want to use it on mobile:
 - ⚡ **Live Progressive Streaming**: Accounts stream dynamically onto your screen as each batch arrives, eliminating blank waiting screens on large accounts.
 - ⚡ **Instant Local Cache (0ms load)**: Re-open and review previously completed audits instantly without re-scraping from scratch.
 - 🌐 **Bilingual (EN / ES)**: Native English and Spanish support with instant switching.
-- 🛡️ **Anti-Ban & Session Protection**: Uses full Instagram Web headers (`X-ASBD-ID`, `X-CSRFToken`, `XMLHttpRequest`) to prevent forced logouts and suspicious activity flags.
+- 🛡️ **Session-aware request handling**: Uses the same browser session context and request headers expected by the Instagram web endpoints. This does not guarantee avoidance of rate limits, action blocks, account restrictions, or suspensions.
 - 🛡️ **Action-Block Guard**: Double-checks unfollow API responses to prevent ghost unfollows; halts the queue automatically if Instagram returns `feedback_required` to protect your account.
-- ⏳ **Smart Rate-Limit & Soft-Block Backoff**: Automatically pauses and retries if Instagram returns HTTP 429 or HTTP 400 (`feedback_required`) with exponential cooldowns instead of failing.
+- ⏳ **Rate-limit backoff**: Pauses and retries conservatively on temporary network/rate-limit responses, and stops when Instagram reports an action block or challenge.
 - ⚠️ **Wrong-Detect Guard**: Expanded page limits supporting accounts with tens of thousands of followers, with safe lock preventing accidental unfollows if a scan is interrupted.
 - 🤍 **Persistent & Bulk Whitelist**: Protect specific accounts with local persistence, JSON export/import, and direct username list pasting.
 - ⚙️ **Customizable Timings**: Control request pacing to match your account safety preferences.
 - 🎨 **Apple-inspired UI**: Clean, responsive, and minimalist interface.
-- 🔒 **100% Client-Side Privacy**: All data is processed locally in your browser. No credentials or data are sent to external servers.
+- 🔒 **Local-first data handling**: This project has no project-owned backend. Scan state, whitelist data, and settings are stored in your browser; Instagram requests still go to Instagram as required for the tool to function.
 
 ---
 
@@ -75,7 +75,7 @@ Una herramienta práctica y ligera que te permite ver quién no te sigue de vuel
 
 ### 🖥️ Uso en Computadora (Escritorio)
 
-1. Copia el código desde la página oficial: [Herramienta InstagramUnfollowers](https://davidarroyo1234.github.io/InstagramUnfollowers/)
+1. Usa la versión actual de [Hassan-Merhi/InstagramUnfollowers](https://github.com/Hassan-Merhi/InstagramUnfollowers). Después de activar GitHub Pages en este repositorio, la publicación de Pages puede ejecutarse manualmente desde Actions.
 2. Presiona el botón **COPY** para copiar el script.
    <br/><img src="./assets/copy_code.png" alt="Botón copiar código" />
 3. Entra a Instagram en tu navegador e inicia sesión en tu cuenta.
@@ -112,23 +112,25 @@ Para usuarios de Android que quieran utilizarlo desde el móvil:
 - ⚡ **Carga progresiva en vivo**: Las cuentas aparecen en pantalla en tiempo real mientras se descargan, evitando pantallas en blanco en cuentas con muchos seguidos.
 - ⚡ **Caché local instantáneo (0ms)**: Carga escaneos anteriores con un solo clic desde la pantalla inicial sin hacer peticiones innecesarias.
 - 🌐 **Soporte Bilingüe (Español / Inglés)**: Interfaz completamente en español e inglés con cambio instantáneo.
-- 🛡️ **Protección antibloqueo y anti-cierre de sesión**: Envía cabeceras completas de Instagram Web (`X-ASBD-ID`, `X-CSRFToken`, `XMLHttpRequest`) para evitar alertas de actividad sospechosa y cierres de sesión forzados.
+- 🛡️ **Manejo consciente de la sesión**: Usa el contexto de sesión y las cabeceras esperadas por los endpoints web de Instagram. Esto no garantiza evitar límites, bloqueos de acciones, restricciones o suspensiones.
 - 🛡️ **Protección contra bloqueos de acción (Action Block)**: Verifica la respuesta real de la API de Instagram al dejar de seguir evitando falsos éxitos ("ghost unfollows"); detiene la cola automáticamente ante `feedback_required` para proteger tu cuenta de suspensiones.
-- ⏳ **Manejo inteligente de Rate Limit y bloqueos suaves**: Pausa y reintenta automáticamente con pausas exponenciales ante respuestas HTTP 429 o HTTP 400 (`feedback_required`) evitando que el escaneo falle.
+- ⏳ **Manejo de límites de solicitudes**: Pausa y reintenta de forma conservadora ante errores temporales o límites, y detiene la operación cuando Instagram informa de un bloqueo o desafío.
 - ⚠️ **Protección contra falsos no-seguidores**: Límites de páginas ampliados para cuentas con decenas de miles de seguidores, y bloqueo de seguridad del unfollow si el escaneo se interrumpió.
 - 🤍 **Lista blanca persistente y masiva**: Protege a tus amigos y familiares con guardado local, exportación/importación en JSON y opción de pegar nombres de usuario directamente.
 - ⚙️ **Tiempos configurables**: Ajusta los intervalos entre peticiones para mayor seguridad.
 - 🎨 **Diseño limpio y moderno**: Interfaz minimalista y responsiva inspirada en el diseño de Apple.
-- 🔒 **Privacidad total**: Todo se ejecuta localmente en tu navegador. Tus datos y contraseñas nunca salen de tu sesión ni van a servidores externos.
+- 🔒 **Datos locales por defecto**: El proyecto no tiene un servidor propio. El estado del escaneo, la lista blanca y los ajustes se guardan en tu navegador; las solicitudes necesarias se envían a Instagram.
 
 ---
 
 ## 🛠️ Desarrollo / Development
 
-- Versión de Node: Node 16+ / Node 18+ / Node 20+
-- Instalar dependencias: `npm install`
-- Compilar: `npm run build`
-- Servidor de desarrollo con recarga automática: `npm run build-dev`
+- Node: 22 LTS (see `.nvmrc`)
+- Install dependencies: `npm ci`
+- Full release validation: `npm run release-check`
+- Build only: `npm run build`
+- Development server: `npm run build-dev`
+- GitHub Pages deployment is manual (`workflow_dispatch`) after Pages is enabled for the repository.
 
 ## ⚖️ Legal & License
 
@@ -138,3 +140,5 @@ Para usuarios de Android que quieran utilizarlo desde el móvil:
 ⚠️ **Use at your own risk! / ¡Úsalo bajo tu propio riesgo!**
 
 📜 Licensed under the [MIT License](LICENSE)
+
+This repository is based on the original **InstagramUnfollowers** project by David Arroyo. The original MIT copyright and license notice are preserved.

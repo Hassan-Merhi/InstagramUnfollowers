@@ -4,7 +4,10 @@
     "build-dev": "npm run build && webpack serve --mode development",
     "build-prod": "npm run build && webpack serve --mode production",
     "update-index": "node scripts/update-index.js public/index.html dist/dist.js",
-    "build": "npm run webpack-build && npm run update-index"
+    "build": "npm run webpack-build && npm run update-index",
+    "typecheck": "tsc --noEmit",
+    "verify-build": "node scripts/release-smoke-check.js",
+    "release-check": "npm run typecheck && npm run build && npm run verify-build && npm audit --omit=dev --audit-level=high"
   },
   "babel": {
     "plugins": [
