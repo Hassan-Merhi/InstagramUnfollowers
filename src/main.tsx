@@ -13,7 +13,6 @@ import {
   DEFAULT_TIME_TO_WAIT_AFTER_FIVE_UNFOLLOWS,
   DEFAULT_USERS_PER_SEARCH_CYCLE,
   FOLLOWING_PAGE_SAFETY_LIMIT,
-  FOLLOW_CHECK_PAGE_SIZE,
   CHECKS_BEFORE_LONG_SLEEP,
   INSTAGRAM_ASBD_ID,
   INSTAGRAM_HOSTNAME,
@@ -23,6 +22,7 @@ import {
 import {
   assertUnreachable,
   fetchFriendshipsPage,
+  fetchFriendshipStatus,
   FriendshipsPage,
   getCookie,
   getCurrentPageUnfollowers,
@@ -31,6 +31,7 @@ import {
   RawFriendshipUser,
   rawFriendshipUserToUserNode,
   sleep,
+  legacyUnfollowUserUrlGenerator,
   unfollowUserUrlGenerator,
 } from "./utils/utils";
 import { NotSearching } from "./components/NotSearching";
@@ -405,13 +406,17 @@ function App() {
       | { readonly ok: true; readonly page: FriendshipsPage }
       | { readonly ok: false; readonly blocked: boolean };
 
-    const fetchPageWithRetry = async (maxId?: string, count?: number, userId?: string): Promise<PageResult> => {
+    const fetchPageWithRetry = async (
+      kind: "following" | "followers",
+      maxId?: string,
+      count?: number,
+    ): Promise<PageResult> => {
       let retries = 0;
       const maxRetries = 3;
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       while (true) {
         try {
-          return { ok: true, page: await fetchFriendshipsPage("following", maxId, count, userId) };
+          return { ok: true, page: await fetchFriendshipsPage(kind, maxId, count) };
         } catch (e: any) {
           const status = e?.status;
           const message = String(e?.message ?? "");
@@ -436,7 +441,7 @@ function App() {
             setToast({ show: false });
             continue;
           }
-          console.error(`Following request failed${userId ? ` for ${userId}` : ""}:`, e);
+          console.error(`${kind} request failed:`, e);
           return { ok: false, blocked: isTransient };
         }
       }
@@ -474,6 +479,7 @@ function App() {
     // false to stop the walk early. Resolves true only if the whole list was
     // walked.
     const fetchList = async (
+      kind: "following" | "followers",
       pageSafetyLimit: number,
       onPageUsers: (pageUsers: readonly RawFriendshipUser[]) => Promise<boolean>,
     ): Promise<boolean> => {
@@ -482,9 +488,9 @@ function App() {
 
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       while (true) {
-        const result = await fetchPageWithRetry(maxId, timings.usersPerSearchCycle);
+        const result = await fetchPageWithRetry(kind, maxId, timings.usersPerSearchCycle);
         if (!result.ok) {
-          console.error("Stopping following scan early.");
+          console.error(`Stopping ${kind} scan early.`);
           return false;
         }
         const page = result.page;
@@ -501,7 +507,7 @@ function App() {
 
         pagesFetched += 1;
         if (pagesFetched >= pageSafetyLimit) {
-          console.error(`Stopping following scan early: hit the safety cap of ${pageSafetyLimit} pages.`);
+          console.error(`Stopping ${kind} scan early: hit the safety cap of ${pageSafetyLimit} pages.`);
           return false;
         }
         maxId = page.next_max_id;
@@ -527,54 +533,98 @@ function App() {
         return;
       }
 
-      // For every page of accounts you follow, read the first page of *their*
-      // following list. Instagram puts the logged-in viewer at the top of it
-      // when the account follows the viewer, so if we show up there they
-      // follow us back; otherwise we assume they don't and list them as a
-      // non-follower. Accounts only appear in the results once checked.
+      // The v1 following payload does not reliably include follows_viewer.
+      // Fetch the viewer's follower IDs once, then compute the difference while
+      // walking the viewer's following list. This avoids one API request per
+      // followed account and eliminates the old "viewer appears first" guess.
       const nonFollowers: UserNode[] = [];
+      const followerIds = new Set<string>();
+      let followerCount = 0;
       let checkedCount = 0;
-      let interrupted = false;
 
-      const checkPage = async (pageUsers: readonly RawFriendshipUser[]): Promise<boolean> => {
-        for (const user of pageUsers) {
-          const userId = String(user.pk_id ?? user.pk);
-          const result = await fetchPageWithRetry(undefined, FOLLOW_CHECK_PAGE_SIZE, userId);
-          if (!result.ok && result.blocked) {
-            interrupted = true;
-            return false;
+      const followersCompleted = await fetchList(
+        "followers",
+        FOLLOWING_PAGE_SAFETY_LIMIT,
+        async (pageUsers) => {
+          for (const user of pageUsers) {
+            followerIds.add(String(user.pk_id ?? user.pk));
           }
-
-          if (result.ok) {
-            const followsViewer = (result.page.users ?? []).some(
-              candidate => String(candidate.pk_id ?? candidate.pk) === viewerId,
-            );
-            if (!followsViewer) {
-              const node = rawFriendshipUserToUserNode(user, false);
-              nonFollowers.push(node);
-              setState(prevState =>
-                prevState.status === "scanning"
-                  ? { ...prevState, results: [...prevState.results, node] }
-                  : prevState,
-              );
-            }
-          }
-          // A non-retryable failure for one account (e.g. unavailable profile)
-          // leaves it unverified, so it's skipped rather than listed.
-
-          checkedCount++;
+          followerCount += pageUsers.length;
           setState(prevState =>
             prevState.status === "scanning"
-              ? { ...prevState, percentage: Math.min(99, Math.round(estimatePhaseProgress(checkedCount))) }
+              ? {
+                  ...prevState,
+                  percentage: Math.min(
+                    45,
+                    Math.round(estimatePhaseProgress(followerCount) * 0.45),
+                  ),
+                }
               : prevState,
           );
+          return true;
+        },
+      );
 
-          await paceRequest();
+      if (!followersCompleted) {
+        setState(prevState =>
+          prevState.status === "scanning"
+            ? {
+                ...prevState,
+                percentage: 100,
+                scanIncomplete: true,
+                isScanningActive: false,
+                results: [],
+              }
+            : prevState,
+        );
+        setToast({
+          show: true,
+          text: t(lang, "scanFailedFollowing"),
+        });
+        return;
+      }
+
+      setState(prevState =>
+        prevState.status === "scanning"
+          ? { ...prevState, percentage: Math.max(prevState.percentage, 45) }
+          : prevState,
+      );
+
+      const checkPage = async (pageUsers: readonly RawFriendshipUser[]): Promise<boolean> => {
+        const pageNonFollowers: UserNode[] = [];
+        for (const user of pageUsers) {
+          const userId = String(user.pk_id ?? user.pk);
+          if (!followerIds.has(userId)) {
+            const node = rawFriendshipUserToUserNode(user, false);
+            nonFollowers.push(node);
+            pageNonFollowers.push(node);
+          }
         }
+
+        checkedCount += pageUsers.length;
+        setState(prevState => {
+          if (prevState.status !== "scanning") {
+            return prevState;
+          }
+          const existingIds = new Set(prevState.results.map(user => user.id));
+          const additions = pageNonFollowers.filter(user => !existingIds.has(user.id));
+          return {
+            ...prevState,
+            percentage: Math.min(
+              99,
+              45 + Math.round(estimatePhaseProgress(checkedCount) * 0.55),
+            ),
+            results: [...prevState.results, ...additions],
+          };
+        });
         return true;
       };
 
-      const followingCompleted = await fetchList(FOLLOWING_PAGE_SAFETY_LIMIT, checkPage);
+      const followingCompleted = await fetchList(
+        "following",
+        FOLLOWING_PAGE_SAFETY_LIMIT,
+        checkPage,
+      );
 
       if (!followingCompleted && checkedCount === 0) {
         setState(prevState =>
@@ -587,9 +637,11 @@ function App() {
         return;
       }
 
-      const scanIsComplete = followingCompleted && !interrupted;
+      const scanIsComplete = followersCompleted && followingCompleted;
 
-      if (scanIsComplete || nonFollowers.length > 0) {
+      // Never overwrite a known-good cache with a partial scan. Older builds
+      // could persist interrupted results and later reload them as if complete.
+      if (scanIsComplete) {
         saveCachedScanResults(nonFollowers);
         setCachedScan({ results: nonFollowers, timestamp: Date.now() });
       }
@@ -637,7 +689,7 @@ function App() {
         // Math.floor would leave progress at 99% when near completion
         const percentage = Math.round((counter / state.selectedResults.length) * 100);
         try {
-          const res = await fetch(unfollowUserUrlGenerator(user.id), {
+          const requestOptions: RequestInit = {
             headers: {
               "content-type": "application/x-www-form-urlencoded",
               "x-csrftoken": csrftoken,
@@ -647,15 +699,61 @@ function App() {
             },
             method: "POST",
             credentials: "same-origin",
-          });
+            body: new URLSearchParams({ user_id: user.id }).toString(),
+          };
+
+          let res = await fetch(unfollowUserUrlGenerator(user.id), requestOptions);
+          // The current v1 endpoint is preferred. Keep the older web route as
+          // a narrow compatibility fallback rather than treating a missing
+          // endpoint as a successful unfollow.
+          if (res.status === 404 || res.status === 405) {
+            res = await fetch(legacyUnfollowUserUrlGenerator(user.id), requestOptions);
+          }
+
           const data = (await res.json().catch(() => null)) as any;
-          const isActionBlocked =
+          let isActionBlocked =
+            res.status === 401 ||
+            res.status === 403 ||
             res.status === 429 ||
             data?.status === "fail" ||
             data?.spam === true ||
-            /feedback_required|checkpoint|action_blocked/i.test(data?.message ?? "");
+            /feedback_required|checkpoint_required|checkpoint|challenge_required|action_blocked|please wait/i.test(
+              data?.message ?? "",
+            );
 
-          const success = res.ok && data?.status !== "fail" && !isActionBlocked;
+          const responseConfirmsUnfollow =
+            data?.friendship_status?.following === false || data?.following === false;
+          const responseSaysStillFollowing =
+            data?.friendship_status?.following === true || data?.following === true;
+
+          let success =
+            res.ok &&
+            data?.status !== "fail" &&
+            !isActionBlocked &&
+            !responseSaysStillFollowing;
+
+          // The legacy web route often returns only {status:"ok"}. When the
+          // response itself cannot prove the relationship changed, verify it
+          // before reporting success to the user.
+          if (success && !responseConfirmsUnfollow) {
+            try {
+              const friendship = await fetchFriendshipStatus(user.id);
+              success = friendship.following === false;
+            } catch (verificationError: any) {
+              console.warn(`Unable to verify unfollow for ${user.username}:`, verificationError);
+              const status = verificationError?.status;
+              const message = String(verificationError?.message ?? "");
+              if (
+                status === 401 ||
+                status === 403 ||
+                status === 429 ||
+                /feedback_required|checkpoint|challenge_required|please wait|rate limit/i.test(message)
+              ) {
+                isActionBlocked = true;
+              }
+              success = false;
+            }
+          }
           if (!success) {
             console.warn(`Unfollow for ${user.username} failed (HTTP ${res.status}):`, data);
           }
