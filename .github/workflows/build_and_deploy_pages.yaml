@@ -1,4 +1,5 @@
-name: Build and update pages
+name: CI and Pages
+
 on:
   push:
     branches:
@@ -9,23 +10,19 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: "pages"
-  cancel-in-progress: false
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 jobs:
-  update_and_deploy:
+  verify:
     runs-on: ubuntu-latest
-    env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Use node
+      - name: Use Node LTS
         uses: actions/setup-node@v4
         with:
           node-version-file: '.nvmrc'
@@ -34,21 +31,30 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Update pages
-        run: |
-          npm run build
+      - name: Release checks
+        run: npm run release-check
 
-      - name: Setup Pages
-        if: github.event_name == 'workflow_dispatch'
-        uses: actions/configure-pages@v4
-
-      - name: Upload artifact
+      - name: Upload Pages artifact
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-pages-artifact@v3
         with:
           path: './public'
 
+  deploy:
+    if: github.event_name == 'workflow_dispatch'
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
       - name: Deploy to GitHub Pages
-        if: github.event_name == 'workflow_dispatch'
         id: deployment
         uses: actions/deploy-pages@v4
