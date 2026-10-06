@@ -11,6 +11,7 @@ export interface SearchingProps {
   setState: React.Dispatch<React.SetStateAction<State>>;
   scanningPaused: boolean;
   pauseScan: () => void;
+  cancelScan: () => void;
   handleScanFilter: (e: React.ChangeEvent<HTMLInputElement>) => void;
   toggleUser: (checked: boolean, user: UserNode) => void;
   UserCheckIcon: React.FC;
@@ -23,6 +24,7 @@ export const Searching = ({
   setState,
   scanningPaused,
   pauseScan,
+  cancelScan,
   handleScanFilter,
   toggleUser,
   UserCheckIcon,
@@ -41,6 +43,13 @@ export const Searching = ({
     state.filter,
   );
   const maxPage = getMaxPage(usersForDisplay);
+  const scanPhaseLabel = state.scanIncomplete
+    ? t(lang, "scanPhaseIncomplete")
+    : state.scanPhase === "followers"
+    ? t(lang, "scanPhaseFollowers")
+    : state.scanPhase === "following"
+    ? t(lang, "scanPhaseFollowing")
+    : t(lang, "scanPhaseComplete");
 
   const selectMatching = (predicate: (user: UserNode) => boolean) => {
     setState(prevState => {
@@ -111,7 +120,10 @@ export const Searching = ({
       <aside className="app-sidebar">
         <div className="sidebar-content">
           <div className="panel-heading">
-            <span>{t(lang, "scanner")}</span>
+            <div className="scan-heading-copy">
+              <span>{t(lang, "scanner")}</span>
+              <small>{scanPhaseLabel}</small>
+            </div>
             <strong>{state.percentage}%</strong>
           </div>
           <menu className="sidebar-filters-grid">
@@ -137,6 +149,15 @@ export const Searching = ({
             <label className="badge m-small">
               <input
                 type="checkbox"
+                name="showPublic"
+                checked={state.filter.showPublic}
+                onChange={handleScanFilter}
+              />
+              &nbsp;{t(lang, "public")}
+            </label>
+            <label className="badge m-small">
+              <input
+                type="checkbox"
                 name="showWithOutProfilePicture"
                 checked={state.filter.showWithOutProfilePicture}
                 onChange={handleScanFilter}
@@ -157,6 +178,12 @@ export const Searching = ({
               onClick={() => selectMatching(user => user.is_private)}
             >
               {t(lang, "private")}
+            </button>
+            <button
+              className="button-secondary"
+              onClick={() => selectMatching(user => !user.is_private)}
+            >
+              {t(lang, "public")}
             </button>
             <button
               className="button-secondary"
@@ -187,7 +214,7 @@ export const Searching = ({
           )}
           <div className="sidebar-stats metric-stack">
             <p><span>{t(lang, "displayed")}</span><strong>{usersForDisplay.length}</strong></p>
-            <p><span>{t(lang, "totalScanned")}</span><strong>{state.results.length}</strong></p>
+            <p><span>{t(lang, "resultsFound")}</span><strong>{state.results.length}</strong></p>
             <p className="whitelist-counter">
               <span>{t(lang, "whitelist")}</span><strong>★ {state.whitelistedResults.length}</strong>
             </p>
@@ -213,13 +240,24 @@ export const Searching = ({
             </div>
           )}
           <div className="sidebar-footer-controls">
-            <button
-              className="button-control button-pause"
-              onClick={pauseScan}
-              disabled={!state.isScanningActive}
-            >
-              {scanningPaused ? t(lang, "resume") : t(lang, "pause")}
-            </button>
+            <div className="scan-control-row">
+              <button
+                className="button-control button-pause"
+                onClick={pauseScan}
+                disabled={!state.isScanningActive}
+              >
+                {scanningPaused ? t(lang, "resume") : t(lang, "pause")}
+              </button>
+              {state.isScanningActive && (
+                <button
+                  className="button-control button-stop"
+                  type="button"
+                  onClick={cancelScan}
+                >
+                  {t(lang, "stopScan")}
+                </button>
+              )}
+            </div>
             <div className="sidebar-pagination">
               <div className="pagination-controls">
                 <a
@@ -347,10 +385,15 @@ export const Searching = ({
             {t(lang, "whitelistedTab")}
           </button>
         </nav>
+        {usersForDisplay.length === 0 && (
+          <div className="empty-results" role="status">
+            {t(lang, "noUsersFound")}
+          </div>
+        )}
         {getCurrentPageUnfollowers(usersForDisplay, state.page).map(user => {
           const firstLetter = user.username.substring(0, 1).toUpperCase();
           return (
-            <>
+            <React.Fragment key={user.id}>
               {firstLetter !== currentLetter && onNewLetter(firstLetter)}
               <label className="result-item">
                 <div className="flex grow align-center">
@@ -434,7 +477,7 @@ export const Searching = ({
                   />
                 </div>
               </label>
-            </>
+            </React.Fragment>
           );
         })}
       </article>

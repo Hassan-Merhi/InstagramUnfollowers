@@ -106,12 +106,14 @@ const getInitialAppState = (): State => {
       currentTab: "non_whitelisted",
       percentage: 100,
       isScanningActive: false,
+      scanPhase: "complete",
       results: previewUsers,
       selectedResults: previewUsers.slice(0, 3),
       whitelistedResults: previewUsers.slice(10, 12),
       filter: {
         showVerified: true,
         showPrivate: true,
+        showPublic: true,
         showWithOutProfilePicture: true,
       },
     };
@@ -121,6 +123,10 @@ const getInitialAppState = (): State => {
   const cachedScan = loadCachedScanResults();
   if (restored !== null && cachedScan !== null) {
     const whitelistedResults = loadWhitelist();
+    const restoredFilter = {
+      ...restored.filter,
+      showPublic: restored.filter.showPublic ?? true,
+    };
     const selectedIds = new Set(restored.selectedIds);
     const selectedResults = cachedScan.results.filter(user => selectedIds.has(user.id));
     const displayed = getUsersForDisplay(
@@ -128,7 +134,7 @@ const getInitialAppState = (): State => {
       whitelistedResults,
       restored.currentTab,
       restored.searchTerm,
-      restored.filter,
+      restoredFilter,
     );
     return {
       status: "scanning",
@@ -138,10 +144,11 @@ const getInitialAppState = (): State => {
       percentage: 100,
       isScanningActive: false,
       scanIncomplete: false,
+      scanPhase: "complete",
       results: cachedScan.results,
       selectedResults,
       whitelistedResults,
-      filter: restored.filter,
+      filter: restoredFilter,
     };
   }
 
@@ -151,6 +158,9 @@ const getInitialAppState = (): State => {
 function App() {
   const [state, setState] = useState<State>(() => getInitialAppState());
   const scanningPausedRef = useRef(false);
+  const scanCancelledRef = useRef(false);
+  const scanAbortControllerRef = useRef<AbortController | null>(null);
+  const allowUnloadRef = useRef(false);
   const [scanningPaused, setScanningPaused] = useState(false);
 
   const pauseScan = () => {
@@ -228,8 +238,27 @@ function App() {
       assertUnreachable(state);
   }
 
+  const cancelScan = () => {
+    scanCancelledRef.current = true;
+    scanAbortControllerRef.current?.abort();
+    scanningPausedRef.current = false;
+    setScanningPaused(false);
+    setToast({
+      show: true,
+      text: t(lang, "stoppingScan"),
+    });
+  };
+
+  const exitApp = () => {
+    if (isActiveProcess && !confirm(t(lang, "exitActiveConfirm"))) {
+      return;
+    }
+    allowUnloadRef.current = true;
+    location.reload();
+  };
+
   const onLoadCached = () => {
-    if (!cachedScan || cachedScan.results.length === 0) {
+    if (!cachedScan) {
       return;
     }
     const whitelistedResults = loadWhitelist();
@@ -240,12 +269,14 @@ function App() {
       currentTab: "non_whitelisted",
       percentage: 100,
       isScanningActive: false,
+      scanPhase: "complete",
       results: cachedScan.results,
       selectedResults: [],
       whitelistedResults,
       filter: {
         showVerified: true,
         showPrivate: true,
+        showPublic: true,
         showWithOutProfilePicture: true,
       },
     });
@@ -260,6 +291,8 @@ function App() {
       return;
     }
     clearScanSession();
+    scanCancelledRef.current = false;
+    scanAbortControllerRef.current = new AbortController();
     scanningPausedRef.current = false;
     setScanningPaused(false);
     if (isLocalPreview) {
@@ -271,12 +304,14 @@ function App() {
         currentTab: "non_whitelisted",
         percentage: 100,
         isScanningActive: false,
+        scanPhase: "complete",
         results: previewUsers,
         selectedResults: previewUsers.slice(0, 3),
         whitelistedResults: previewUsers.slice(10, 12),
         filter: {
           showVerified: true,
           showPrivate: true,
+          showPublic: true,
           showWithOutProfilePicture: true,
         },
       });
@@ -290,12 +325,14 @@ function App() {
       currentTab: "non_whitelisted",
       percentage: 0,
       isScanningActive: true,
+      scanPhase: "followers",
       results: [],
       selectedResults: [],
       whitelistedResults,
       filter: {
         showVerified: true,
         showPrivate: true,
+        showPublic: true,
         showWithOutProfilePicture: true,
       },
     });
@@ -439,7 +476,7 @@ function App() {
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
       // Prompt user if he tries to leave while in the middle of a process (searching / unfollowing / etc..)
       // This is especially good for avoiding accidental tab closing which would result in a frustrating experience.
-      if (!isActiveProcess) {
+      if (!isActiveProcess || allowUnloadRef.current) {
         return;
       }
 
@@ -468,6 +505,19 @@ function App() {
     const estimatePhaseProgress = (usersFetchedSoFar: number): number =>
       100 * (1 - 1 / (1 + usersFetchedSoFar / 150));
 
+    const sleepWhileScanActive = async (ms: number): Promise<boolean> => {
+      let remaining = Math.max(0, ms);
+      while (remaining > 0) {
+        if (scanCancelledRef.current) {
+          return false;
+        }
+        const chunk = Math.min(250, remaining);
+        await sleep(chunk);
+        remaining -= chunk;
+      }
+      return !scanCancelledRef.current;
+    };
+
     // Fetches one page, retrying with backoff on rate limits / network errors.
     // `blocked` is true when retries were exhausted for such a transient error
     // (the scan should stop); false means a different, non-retryable error
@@ -485,9 +535,24 @@ function App() {
       const maxRetries = 4;
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       while (true) {
+        if (scanCancelledRef.current) {
+          return { ok: false, blocked: false };
+        }
         try {
-          return { ok: true, page: await fetchFriendshipsPage(kind, maxId, count) };
+          return {
+            ok: true,
+            page: await fetchFriendshipsPage(
+              kind,
+              maxId,
+              count,
+              undefined,
+              scanAbortControllerRef.current?.signal,
+            ),
+          };
         } catch (e: any) {
+          if (scanCancelledRef.current || e?.name === "AbortError") {
+            return { ok: false, blocked: false };
+          }
           const status = e?.status;
           const message = String(e?.message ?? "");
           const isRateLimitOrSoftBlock =
@@ -502,11 +567,16 @@ function App() {
               ? RATE_LIMIT_COOLDOWN_SECONDS * retries
               : 5 * retries;
             for (let sec = waitSeconds; sec > 0; sec--) {
+              if (scanCancelledRef.current) {
+                return { ok: false, blocked: false };
+              }
               setToast({
                 show: true,
                 text: t(lang, "rateLimitPause", sec),
               });
-              await sleep(1000);
+              if (!(await sleepWhileScanActive(1000))) {
+                return { ok: false, blocked: false };
+              }
             }
             setToast({ show: false });
             continue;
@@ -518,30 +588,42 @@ function App() {
     };
 
     let requestsSinceLongSleep = 0;
-    const paceRequest = async () => {
-      // Pause scanning if user requested so.
+    const paceRequest = async (): Promise<boolean> => {
       while (scanningPausedRef.current) {
-        await sleep(1000);
-        console.info("Scan paused");
+        if (scanCancelledRef.current) {
+          return false;
+        }
+        await sleep(250);
       }
 
-      await sleep(Math.floor(Math.random() * 700) + 300);
-      await sleep(Math.floor(Math.random() * (timings.timeBetweenSearchCycles - timings.timeBetweenSearchCycles * 0.7)) + timings.timeBetweenSearchCycles);
+      if (!(await sleepWhileScanActive(Math.floor(Math.random() * 700) + 300))) {
+        return false;
+      }
+      const cycleDelay =
+        Math.floor(
+          Math.random() * (timings.timeBetweenSearchCycles - timings.timeBetweenSearchCycles * 0.7),
+        ) + timings.timeBetweenSearchCycles;
+      if (!(await sleepWhileScanActive(cycleDelay))) {
+        return false;
+      }
 
       requestsSinceLongSleep++;
       if (requestsSinceLongSleep >= CHECKS_BEFORE_LONG_SLEEP) {
         requestsSinceLongSleep = 0;
         const longSleepVar = Math.max(
           0,
-          timings.timeToWaitAfterFiveSearchCycles + (Math.random() * 10000 - 5000), // +/- 5 seconds
+          timings.timeToWaitAfterFiveSearchCycles + (Math.random() * 10000 - 5000),
         );
         setToast({
           show: true,
           text: t(lang, "sleepingSafety", Math.round(longSleepVar / 1000)),
         });
-        await sleep(longSleepVar);
+        if (!(await sleepWhileScanActive(longSleepVar))) {
+          return false;
+        }
       }
       setToast({ show: false });
+      return !scanCancelledRef.current;
     };
 
     // Walks the viewer's own following list page by page. `onPageUsers` is
@@ -560,6 +642,9 @@ function App() {
 
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       while (true) {
+        if (scanCancelledRef.current) {
+          return false;
+        }
         const result = await fetchPageWithRetry(kind, maxId, timings.usersPerSearchCycle);
         if (!result.ok) {
           console.error(`Stopping ${kind} scan early.`);
@@ -574,7 +659,7 @@ function App() {
 
         const page = result.page;
         const pageUsers = page.users ?? [];
-        if (!(await onPageUsers(pageUsers))) {
+        if (!(await onPageUsers(pageUsers)) || scanCancelledRef.current) {
           return false;
         }
 
@@ -613,7 +698,9 @@ function App() {
         }
 
         maxId = nextMaxId;
-        await paceRequest();
+        if (!(await paceRequest())) {
+          return false;
+        }
       }
     };
 
@@ -667,11 +754,11 @@ function App() {
       );
 
       if (!followersCompleted) {
+        const wasCancelled = scanCancelledRef.current;
         setState(prevState =>
           prevState.status === "scanning"
             ? {
                 ...prevState,
-                percentage: 100,
                 scanIncomplete: true,
                 isScanningActive: false,
                 results: [],
@@ -680,18 +767,25 @@ function App() {
         );
         setToast({
           show: true,
-          text: t(lang, "scanFailedFollowing"),
+          text: wasCancelled ? t(lang, "scanStopped") : t(lang, "scanFailedFollowers"),
         });
         return;
       }
 
       setState(prevState =>
         prevState.status === "scanning"
-          ? { ...prevState, percentage: Math.max(prevState.percentage, 45) }
+          ? {
+              ...prevState,
+              percentage: Math.max(prevState.percentage, 45),
+              scanPhase: "following",
+            }
           : prevState,
       );
 
       const checkPage = async (pageUsers: readonly RawFriendshipUser[]): Promise<boolean> => {
+        if (scanCancelledRef.current) {
+          return false;
+        }
         const pageNonFollowers: UserNode[] = [];
         for (const user of pageUsers) {
           const userId = String(user.pk_id ?? user.pk);
@@ -730,13 +824,25 @@ function App() {
         checkPage,
       );
 
-      if (!followingCompleted && checkedCount === 0) {
+      if (!followingCompleted) {
+        const wasCancelled = scanCancelledRef.current;
         setState(prevState =>
-          prevState.status === "scanning" ? { ...prevState, isScanningActive: false } : prevState,
+          prevState.status === "scanning"
+            ? {
+                ...prevState,
+                scanIncomplete: true,
+                isScanningActive: false,
+                results: nonFollowers,
+              }
+            : prevState,
         );
         setToast({
           show: true,
-          text: t(lang, "scanFailedFollowing"),
+          text: wasCancelled
+            ? t(lang, "scanStopped")
+            : checkedCount === 0
+            ? t(lang, "scanFailedFollowing")
+            : t(lang, "partialScanInterrupted", checkedCount),
         });
         return;
       }
@@ -759,6 +865,7 @@ function App() {
           percentage: 100,
           scanIncomplete: !scanIsComplete,
           isScanningActive: false,
+          scanPhase: scanIsComplete ? "complete" : prevState.scanPhase,
           results: nonFollowers,
         };
       });
@@ -956,6 +1063,7 @@ function App() {
         handleScanFilter={handleScanFilter}
         toggleUser={toggleUser}
         pauseScan={pauseScan}
+        cancelScan={cancelScan}
         setState={setState}
         scanningPaused={scanningPaused}
         UserCheckIcon={UserCheckIcon}
@@ -994,6 +1102,7 @@ function App() {
           onWhitelistUpdate={onWhitelistUpdate}
           lang={lang}
           onLanguageChange={handleLanguageChange}
+          onExit={exitApp}
         ></Toolbar>
 
         {markup}
