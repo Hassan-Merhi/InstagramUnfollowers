@@ -44,10 +44,10 @@ export const WhitelistManager = ({ whitelistedUsers, onWhitelistUpdate, lang }: 
             text: `Merged successfully! Added ${newUsersCount} new users (${importedUsers.length} imported, ${importedUsers.length - newUsersCount} duplicates skipped)` 
           });
         } else {
-          finalUsers = importedUsers;
-          setMessage({ 
-            type: "success", 
-            text: `Replaced whitelist with ${importedUsers.length} users` 
+          finalUsers = mergeWhitelists([], importedUsers);
+          setMessage({
+            type: "success",
+            text: `Replaced whitelist with ${finalUsers.length} unique users`,
           });
         }
         
